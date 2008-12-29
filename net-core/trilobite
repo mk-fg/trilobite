@@ -4,17 +4,23 @@
 from optparse import OptionParser
 parser = OptionParser(usage='%prog [options]')
 parser.add_option('-n', '--no-revert', action='store_true', dest='no_revert', help='do not schedule tables revert (in case of ssh lock), not recommended, since you never know when firewall may lock itself up')
-(optz, argz) = parser.parse_args()
+parser.add_option('-d', '--dump', action='store_true', dest='dump', help='just dump resulting tables to stdout')
+optz, argz = parser.parse_args()
 
 
 from string import whitespace as spaces
 from subprocess import Popen, PIPE
 import os, sys, yaml, re
 
+import logging as log
+log.basicConfig(level=log.INFO)
+
 
 extents = {
 	'--mac-source':  '-m mac',
-	'--state':  '-m state'
+	'--state':  '-m state',
+	'--src-range':  '-m iprange',
+	'--dst-range':  '-m iprange'
 }
 extents = [(re.compile('('+k+')'), '%s %s'%(v,k)) for k,v in extents.iteritems()]
 pex = re.compile('(?<=-p\s)((\w+/)+\w+)')
@@ -177,31 +183,35 @@ def pull_table(v):
 
 
 for v in ('v4','v6'):
-	# Pull the old table, to check if it's similar to new one (no backup needed in that case)
-	old_table,old_hash = pull_table(v)
+	if not optz.dump:
+		# Pull the old table, to check if it's similar to new one (no backup needed in that case)
+		old_table,old_hash = pull_table(v)
 
-	# Push new table
-	iptables = Popen(cfg['fs']['bin'][v+'_push'], stdin=PIPE, stdout=sys.stdout, stderr=sys.stderr)
-	iptables.stdin.write(core.fetch(v))
-	iptables.stdin.close()
-	iptables.wait() # Wait for process to digest and apply pushed table
+		# Push new table
+		iptables = Popen(cfg['fs']['bin'][v+'_push'], stdin=PIPE, stdout=sys.stdout, stderr=sys.stderr)
+		iptables.stdin.write(core.fetch(v))
+		iptables.stdin.close()
+		iptables.wait() # Wait for process to digest and apply pushed table
 
-	# Pull new table in iptables-save format, to compare against old one
-	new_table,new_hash = pull_table(v)
+		# Pull new table in iptables-save format, to compare against old one
+		new_table,new_hash = pull_table(v)
 
-	if old_hash != new_hash:
-		# Backup old table in backup.0 slot, rotating the rest of them
-		i_slot = None
-		for i in sorted([cfg['fs']['bakz'][v]%i for i in xrange(cfg['fs']['bakz']['keep'])], reverse=True):
-			if os.path.exists(i) and i_slot: os.rename(i, i_slot)
-			i_slot = i
-		else: open(i, 'w').write(old_table)
-		# Schedule table revert if no commit action will be issued (to ensure that tables are in the sane state)
-		if not optz.no_revert:
-			at = Popen(
-				[cfg['fs']['bakz']['at'], 'now', '+', str(cfg['fs']['bakz']['delay']), 'minutes'],
-				stdin=PIPE, stdout=sys.stdout, stderr=sys.stderr
-			)
-			at.stdin.write('%s < %s\n'%(cfg['fs']['bin'][v+'_push'], i)) # Restore from latest backup
-			at.stdin.close()
-			at.wait()
+		if old_hash != new_hash:
+			# Backup old table in backup.0 slot, rotating the rest of them
+			i_slot = None
+			for i in sorted([cfg['fs']['bakz'][v]%i for i in xrange(cfg['fs']['bakz']['keep'])], reverse=True):
+				if os.path.exists(i) and i_slot: os.rename(i, i_slot)
+				i_slot = i
+			else: open(i, 'w').write(old_table)
+			# Schedule table revert if no commit action will be issued (to ensure that tables are in the sane state)
+			if not optz.no_revert:
+				at = Popen(
+					[cfg['fs']['bakz']['at'], 'now', '+', str(cfg['fs']['bakz']['delay']), 'minutes'],
+					stdin=PIPE, stdout=sys.stdout, stderr=sys.stderr
+				)
+				at.stdin.write('%s < %s\n'%(cfg['fs']['bin'][v+'_push'], i)) # Restore from latest backup
+				at.stdin.close()
+				at.wait()
+	else:
+		log.info('%s table:'%v)
+		sys.stdout.write(core.fetch(v)+'\n\n')
