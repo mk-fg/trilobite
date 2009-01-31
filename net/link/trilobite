@@ -112,7 +112,8 @@ for table,chainz in cfg['tablez'].iteritems():
 				chainz[chain][1].append((pre, rulez))
 
 	# Form actual tables
-	for name,chain in chainz.iteritems():
+	chainz = sorted(chainz.iteritems(), key=lambda x: x[0].lower() in builtins)
+	for name,chain in chainz:
 		policy,ruleset = chain
 		if name.lower() in builtins: name = name.upper()
 		else: policy = '-'
@@ -152,7 +153,7 @@ for table,chainz in cfg['tablez'].iteritems():
 					elif rule.endswith(' x'): rule = (rule[:-2], '-j', 'REJECT')
 					elif rule.endswith(' -'): rule = (rule[:-2], '-j', 'DROP')
 					elif rule.endswith(' <'): rule = (rule[:-2], '-j', 'RETURN')
-					elif ' -j ' not in rule: rule = (rule, '-j', 'ACCEPT')
+					elif '-j ' not in rule: rule = (rule, '-j', 'ACCEPT')
 					# Full rule, no action mangling is necessary
 					else: rule = (rule,)
 
