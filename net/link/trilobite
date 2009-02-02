@@ -147,7 +147,7 @@ for table,chainz in cfg['tablez'].iteritems():
 					if not rule: rule = ('-j', 'DROP')
 					elif len(rule) == 1:
 						if rule == 'x': rule = ('-j', 'REJECT')
-						if rule == '<': rule = ('-j', 'RETURN')
+						elif rule == '<': rule = ('-j', 'RETURN')
 						else: rule = ('-j', 'ACCEPT')
 					# Rule actions
 					elif rule.endswith(' x'): rule = (rule[:-2], '-j', 'REJECT')
