@@ -21,9 +21,10 @@ extents = {
 	'--mac-source':  '-m mac',
 	'--state':  '-m state',
 	'--src-range':  '-m iprange',
-	'--dst-range':  '-m iprange'
+	'--dst-range':  '-m iprange',
+	'--dport (\S+,)+\S+':  '-m multiport'
 }
-extents = [(re.compile('('+k+')'), '%s %s'%(v,k)) for k,v in extents.iteritems()]
+extents = [(re.compile('('+k+')'), '%s \\1'%v) for k,v in extents.iteritems()]
 pex = ( re.compile('(?<=-p\s)((\w+/)+\w+)'), re.compile('(?<=port\s)((\d+/)+\d+)') )
 vmark = re.compile('(\s*-(v[46]))(?=\s|$)')
 
@@ -160,7 +161,7 @@ for table,chainz in cfg['tablez'].iteritems():
 					rule = ' '.join(('-A', name) + pre + rule) # Rule composition
 					for k,v in extents: rule = k.sub(v, rule) # Rule extension (for example, adds '-m ...', where necessary)
 
-					# Protocol/port extension (clone rule for each proto)
+					# Protocol extension (clone rule for each proto)
 					if rule:
 						rules = [rule]
 						for ex in pex:
