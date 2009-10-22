@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 
 from optparse import OptionParser
@@ -223,7 +223,7 @@ for v in ('v4','v6'):
 				bak_new = '/tmp/trilobite_new'
 				open(bak_new, 'w').write(new_essence+'\n')
 				Popen(
-					cfg['fs']['bakz']['diff'].split(' ') + [bak_old, bak_new],
+					cfg['fs']['bin']['diff'].split(' ') + [bak_old, bak_new],
 					stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr
 				).wait()
 				os.unlink(bak_old)
@@ -233,7 +233,7 @@ for v in ('v4','v6'):
 			# Schedule table revert if no commit action will be issued (to ensure that tables are in the sane state)
 			if not optz.no_revert:
 				at = Popen(
-					[cfg['fs']['bakz']['at'], 'now', '+', str(cfg['fs']['bakz']['delay']), 'minutes'],
+					[cfg['fs']['bin']['at'], 'now', '+', str(cfg['fs']['bakz']['delay']), 'minutes'],
 					stdin=PIPE, stdout=sys.stdout, stderr=sys.stderr
 				)
 				at.stdin.write('%s < %s\n'%(cfg['fs']['bin'][v+'_push'], i)) # Restore from latest backup
