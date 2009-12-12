@@ -35,7 +35,7 @@ class Tables:
 	v4 = []
 	v6 = []
 	v4_mark = re.compile('\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}')
-	v6_mark = re.compile('[a-f0-9]{1,4}::([a-f0-9]{1,4}|/)') # Far from perfect, but should do
+	v6_mark = re.compile('[a-f0-9]{0,4}::([a-f0-9]{1,4}|/)') # Far from perfect, but should do
 	mark = None
 	def append(self, rules, v=None):
 		if v: getattr(self, v).append(rules) # Rule was marked during mangling
