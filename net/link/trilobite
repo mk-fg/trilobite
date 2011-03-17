@@ -42,6 +42,7 @@ pex = re.compile('(?<=-p\s)((\w+/)+\w+)'),\
 vmark = re.compile('(\s*-(v[46]))(?=\s|$)') # IP version mark
 
 cfgs = open(os.path.realpath(os.path.splitext(__file__)[0])+'.yaml').read()
+cfgs = cfgs.replace('\t', '  ') # I tend to use tabs, which are not YAML-friendly
 cfgs = re.sub(re.compile(' *\\\\\n\s*', re.M), ' ', cfgs)
 cfg = yaml.load(cfgs)
 
