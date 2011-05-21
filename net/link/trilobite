@@ -3,15 +3,14 @@
 
 from optparse import OptionParser
 parser = OptionParser(usage='%prog [options]')
-parser.add_option('-n', '--no-revert',
-	action='store_true', dest='no_revert',
-	help=('do not schedule tables revert (in case of ssh lock),'
-		' not recommended, since you never know when firewall may lock itself up'))
-parser.add_option('-s', '--summary',
-	action='store_true', dest='summary',
+parser.add_option('-n', '--no-revert', action='store_true',
+	help='do not schedule tables revert (in case of ssh lock),'
+		' not recommended, since you never know when firewall may lock itself up')
+parser.add_option('-x', '--no-ipsets', action='store_true',
+	help='do not process ipsets and related rules')
+parser.add_option('-s', '--summary', action='store_true',
 	help='show diff between old and new tables afterwards')
-parser.add_option('-d', '--dump',
-	action='store_true', dest='dump',
+parser.add_option('-d', '--dump', action='store_true',
 	help='no changes, just dump resulting tables to stdout')
 optz, argz = parser.parse_args()
 
@@ -118,7 +117,7 @@ def diff_summary(old, new):
 
 ### IPSETS
 sets = defaultdict(list)
-if cfg.get('sets'):
+if not optz.no_ipsets and cfg.get('sets'):
 	null = open('/dev/null', 'wb')
 
 	# Generate new ipset specs
