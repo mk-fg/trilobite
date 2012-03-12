@@ -4,14 +4,20 @@
 from optparse import OptionParser
 parser = OptionParser(usage='%prog [options]')
 parser.add_option('-n', '--no-revert', action='store_true',
-	help='do not schedule tables revert (in case of ssh lock),'
-		' not recommended, since you never know when firewall may lock itself up')
+	help='Do not schedule tables revert (in case of ssh lock),'
+		' not recommended, since you never know when firewall may lock itself up.')
 parser.add_option('-x', '--no-ipsets', action='store_true',
-	help='do not process ipsets and related rules')
+	help='Do not process ipsets and related rules.')
 parser.add_option('-s', '--summary', action='store_true',
-	help='show diff between old and new tables afterwards')
+	help='Show diff between old and new tables afterwards.')
 parser.add_option('-d', '--dump', action='store_true',
-	help='no changes, just dump resulting tables to stdout')
+	help='No changes, just dump resulting tables to stdout.')
+parser.add_option('-c', '--check-diff', action='store_true',
+	help='No changes, return 0 ("identical") or 2 status (not 1, so it wont be'
+		' confused with any generic error), depending on whether there are changes'
+		' in configuration waiting to be applied (configuration differs from current'
+		' iptables settings). Does not performs any ipset manipulations/comparisons.'
+		' It is done in somewhat DANGEROUS way - tables get swapped for a short time.')
 optz, argz = parser.parse_args()
 
 
@@ -22,6 +28,8 @@ import os, sys, yaml, re
 
 import logging as log
 log.basicConfig(level=log.INFO)
+
+os.umask(077)
 
 
 builtins = set([ 'input', 'forward', 'output',
@@ -104,13 +112,13 @@ def chainspec(chain):
 
 
 def diff_summary(old, new):
-	bak_old = '/tmp/trilobite_old'
-	open(bak_old, 'w').write(old+'\n')
-	bak_new = '/tmp/trilobite_new'
-	open(bak_new, 'w').write(new+'\n')
-	Popen(cfg['fs']['bin']['diff'].split(' ') + [bak_old, bak_new]).wait()
-	os.unlink(bak_old)
-	os.unlink(bak_new)
+	from tempfile import NamedTemporaryFile
+	with NamedTemporaryFile(prefix='trilobite_old.') as bak_old,\
+			NamedTemporaryFile(prefix='trilobite_new.') as bak_new:
+		bak_old.write(old+'\n')
+		bak_new.write(new+'\n')
+		bak_old.flush(), bak_new.flush()
+		Popen(cfg['fs']['bin']['diff'].split(' ') + [bak_old.name, bak_new.name]).wait()
 	sys.stdout.write('\n\n')
 
 
@@ -123,62 +131,67 @@ if not optz.no_ipsets and cfg.get('sets'):
 
 	# Generate new ipset specs
 	for name,props in cfg['sets'].iteritems():
+		if optz.check_diff:
+			sets[name] = list() # has to exist, nothing more
+			continue
 		sets[name].append(['-N', name] + props['type'].split())
 		for line in (props.get('contents') or list()): sets[name].append(['-A', name] + line.split())
 
-	def pull_sets():
-		ipset = Popen([cfg['fs']['bin']['ipset'], '--save'], stdout=PIPE)
-		old_sets, stripped = '', list()
-		for line in ipset.stdout:
-			old_sets += line
-			line = line.strip()
-			if not line.startswith('#'): stripped.append(line) # strip comments
-		if ipset.wait():
-			log.fatal('ipsets backup failed, bailing out')
-			sys.exit(1)
-		return old_sets, '\n'.join(stripped)
+	if not optz.check_diff:
 
-	# Pull old sets' configuration
-	old_sets, old_essence = pull_sets()
+		def pull_sets():
+			ipset = Popen([cfg['fs']['bin']['ipset'], '--save'], stdout=PIPE)
+			old_sets, stripped = '', list()
+			for line in ipset.stdout:
+				old_sets += line
+				line = line.strip()
+				if not line.startswith('#'): stripped.append(line) # strip comments
+			if ipset.wait():
+				log.fatal('ipsets backup failed, bailing out')
+				sys.exit(1)
+			return old_sets, '\n'.join(stripped)
 
-	# Clear namespace for used sets
-	for name in list(sets):
-		if not Popen([cfg['fs']['bin']['ipset'], '--list', name], stdout=null, stderr=STDOUT).wait():
-			if Popen([cfg['fs']['bin']['ipset'], '--destroy', name], stdout=null, stderr=STDOUT).wait():
-				log.warn('Failed to destroy ipset "{}", will be skipped on --restore'.format(name))
-				sets[name] = list() # should not be restored
-	# Push new sets
-	ipset = Popen([cfg['fs']['bin']['ipset'], '--restore'], stdin=PIPE)
-	ipset.stdin.write('\n'.join(it.imap(' '.join, it.chain.from_iterable(sets.viewvalues()))))
-	ipset.stdin.write('\nCOMMIT\n')
-	ipset.stdin.close()
-	ipset.wait()
+		# Pull old sets' configuration
+		old_sets, old_essence = pull_sets()
 
-	# Pull new sets' configuration, to compare against old ones
-	new_sets, new_essence = pull_sets()
+		# Clear namespace for used sets
+		for name in list(sets):
+			if not Popen([cfg['fs']['bin']['ipset'], '--list', name], stdout=null, stderr=STDOUT).wait():
+				if Popen([cfg['fs']['bin']['ipset'], '--destroy', name], stdout=null, stderr=STDOUT).wait():
+					log.warn('Failed to destroy ipset "{}", will be skipped on --restore'.format(name))
+					sets[name] = list() # should not be restored
+		# Push new sets
+		ipset = Popen([cfg['fs']['bin']['ipset'], '--restore'], stdin=PIPE)
+		ipset.stdin.write('\n'.join(it.imap(' '.join, it.chain.from_iterable(sets.viewvalues()))))
+		ipset.stdin.write('\nCOMMIT\n')
+		ipset.stdin.close()
+		ipset.wait()
 
-	if old_essence != new_essence:
-		# Backup old sets in backup.0 slot, rotating the rest of them
-		i_slot = None
-		for i in sorted(( cfg['fs']['bakz']['sets']%i
-				for i in xrange(cfg['fs']['bakz']['keep']) ), reverse=True):
-			if os.path.exists(i) and i_slot: os.rename(i, i_slot)
-			i_slot = i
-		else: open(i, 'w').write(old_sets)
+		# Pull new sets' configuration, to compare against old ones
+		new_sets, new_essence = pull_sets()
 
-		# Generate diff, if requested
-		if optz.summary:
-			log.info('IPSets:')
-			diff_summary(old_essence, new_essence)
+		if old_essence != new_essence:
+			# Backup old sets in backup.0 slot, rotating the rest of them
+			i_slot = None
+			for i in sorted(( cfg['fs']['bakz']['sets']%i
+					for i in xrange(cfg['fs']['bakz']['keep']) ), reverse=True):
+				if os.path.exists(i) and i_slot: os.rename(i, i_slot)
+				i_slot = i
+			else: open(i, 'w').write(old_sets)
 
-		# Schedule sets' revert if no commit action will be issued (to ensure that tables are in the sane state)
-		if not optz.no_revert:
-			at = Popen([cfg['fs']['bin']['at'], 'now', '+', str(cfg['fs']['bakz']['delay']), 'minutes'], stdin=PIPE)
-			for name in sets:
-				at.stdin.write('{} --destroy {}\n'.format(cfg['fs']['bin']['ipset'], name)) # destroy modified sets
-			at.stdin.write('{} --restore < {}\n'.format(cfg['fs']['bin']['ipset'], i)) # restore from latest backup
-			at.stdin.close()
-			at.wait()
+			# Generate diff, if requested
+			if optz.summary:
+				log.info('IPSets:')
+				diff_summary(old_essence, new_essence)
+
+			# Schedule sets' revert if no commit action will be issued (to ensure that tables are in the sane state)
+			if not optz.no_revert:
+				at = Popen([cfg['fs']['bin']['at'], 'now', '+', str(cfg['fs']['bakz']['delay']), 'minutes'], stdin=PIPE)
+				for name in sets:
+					at.stdin.write('{} --destroy {}\n'.format(cfg['fs']['bin']['ipset'], name)) # destroy modified sets
+				at.stdin.write('{} --restore < {}\n'.format(cfg['fs']['bin']['ipset'], i)) # restore from latest backup
+				at.stdin.close()
+				at.wait()
 
 
 
@@ -320,6 +333,14 @@ def pull_table(v):
 		sys.exit(1)
 	return table, '\n'.join(stripped)
 
+class TableUpdateError(Exception): pass
+
+def push_table(v, table):
+	iptables = Popen(cfg['fs']['bin'][v+'_push'], stdin=PIPE)
+	iptables.stdin.write(table)
+	iptables.stdin.close()
+	if iptables.wait(): raise TableUpdateError('Failed to update table')
+
 
 for v in ('v4', 'v6'):
 	if not optz.dump:
@@ -327,27 +348,31 @@ for v in ('v4', 'v6'):
 		old_table, old_essence = pull_table(v)
 
 		# Push new table
-		iptables = Popen(cfg['fs']['bin'][v+'_push'], stdin=PIPE)
-		iptables.stdin.write(core.fetch(v))
-		iptables.stdin.close()
-		iptables.wait() # wait for process to digest and apply pushed table
+		try: push_table(v, core.fetch(v))
+		except TableUpdateError as err: log.error(bytes(err))
 
 		# Pull new table in iptables-save format, to compare against old one
 		new_table, new_essence = pull_table(v)
 
 		if old_essence != new_essence:
-			# Backup old table in backup.0 slot, rotating the rest of them
-			i_slot = None
-			for i in sorted(( cfg['fs']['bakz'][v]%i
-					for i in xrange(cfg['fs']['bakz']['keep']) ), reverse=True):
-				if os.path.exists(i) and i_slot: os.rename(i, i_slot)
-				i_slot = i
-			else: open(i, 'w').write(old_table)
+			if not optz.check_diff:
+				# Backup old table in backup.0 slot, rotating the rest of them
+				i_slot = None
+				for i in sorted(( cfg['fs']['bakz'][v]%i
+						for i in xrange(cfg['fs']['bakz']['keep']) ), reverse=True):
+					if os.path.exists(i) and i_slot: os.rename(i, i_slot)
+					i_slot = i
+				else: open(i, 'w').write(old_table)
+			else:
+				push_table(v, old_table) # restore old table
 
 			# Generate diff, if requested
 			if optz.summary:
 				log.info('%s table:'%v)
 				diff_summary(old_essence, new_essence)
+
+			# First diff means we're done if that's what is requested
+			if optz.check_diff: sys.exit(2)
 
 			# Schedule table revert if no commit action will be issued (to ensure that tables are in the sane state)
 			if not optz.no_revert:
