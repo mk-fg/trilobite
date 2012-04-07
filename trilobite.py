@@ -45,8 +45,7 @@ log.basicConfig(level=log.INFO)
 os.umask(077)
 
 
-builtins = set([ 'input', 'forward', 'output',
-	'prerouting', 'mangle', 'postrouting' ])
+builtins = {'input', 'forward', 'output', 'prerouting', 'mangle', 'postrouting'}
 extents = {
 	'--mac-source': '-m mac',
 	'--state': '-m state',
@@ -57,7 +56,7 @@ extents = {
 	'--pkt-type': '-m pkttype',
 	'--uid-owner': '-m owner' }
 extents = list( (re.compile('(?<=\s)((! )?'+k+')'), '%s \\1'%v)
-	for k,v in extents.iteritems() )
+	for k,v in extents.viewitems() )
 pex = re.compile('(?<=-p\s)((\w+/)+\w+)'),\
 	re.compile('(?<=port\s)((\d+/)+\d+)') # protocol extension
 vmark = re.compile('(\s*-(v[46]))(?=\s|$)') # IP version mark
@@ -98,7 +97,7 @@ class Tables:
 		str = '\n'.join
 		return (str(self.v4), str(self.v6)) if not v else str(getattr(self, v))
 
-core = Tables()
+dump = Tables()
 
 
 def chainspec(chain):
@@ -121,7 +120,7 @@ def chainspec(chain):
 			pre = (rule, pre)
 	else: pre = ()
 
-	return chain,policy,pre
+	return chain, policy, pre
 
 
 def diff_summary(old, new):
@@ -136,14 +135,14 @@ def diff_summary(old, new):
 
 
 
+### ipsets
 
-### IPSETS
 sets = defaultdict(list)
 if not optz.no_ipsets and cfg.get('sets'):
 	null = open('/dev/null', 'wb')
 
 	# Generate new ipset specs
-	for name,props in cfg['sets'].iteritems():
+	for name,props in cfg['sets'].viewitems():
 		if optz.check_diff:
 			sets[name] = list() # has to exist, nothing more
 			continue
@@ -208,11 +207,11 @@ if not optz.no_ipsets and cfg.get('sets'):
 
 
 
+### iptables
 
-### IPTABLES
-for table,chainz in cfg['tablez'].iteritems():
-	if table != 'nat': add = core.append
-	else: add = lambda x: core.append(x, 'v4')
+for table, chainz in cfg['tablez'].viewitems():
+	if table != 'nat': add = dump.append
+	else: add = ft.partial(dump.append, v='v4')
 	add('*'+table) # table header (like '*filter')
 
 	try: svc = chainz.pop('svc')
@@ -230,41 +229,41 @@ for table,chainz in cfg['tablez'].iteritems():
 	if svc:
 		cfgt = re.findall('\n(\s+)'+table+':(.+?)\n((\\1)\S+:.*|$)', cfgs, re.S)[0][1]
 		ih = {}
-		for name,rulez in svc.iteritems():
+		for name, rulez in svc.viewitems():
 			indent = re.findall('^(\s+)'+name+':', cfgt, re.M)
 			for i in indent:
 				i = i.lstrip('\n')
 				try:
 					if name not in ih[i]: ih[i].append(name)
 				except KeyError: ih[i] = [name]
-		indent, ih = sorted(ih.iteritems(), key=lambda x: len(x[1]), reverse=True)[0]
+		indent, ih = sorted(ih.viewitems(), key=lambda x: len(x[1]), reverse=True)[0]
 		for name in re.findall('^'+indent+'(\S+):', cfgt, re.M):
 			if name not in ih: continue
-			try: pre = svc[name].iteritems() # full specification (dict w/ chain and rules list)
+			try: pre = svc[name].viewitems() # full specification (dict w/ chain and rules list)
 			except AttributeError: pre = [('input', svc[name])] # it's just a list of rules, defaults to input chain
-			for chain,rulez in pre:
+			for chain, rulez in pre:
 				chain, policy, pre = chainspec(chain) # policy here is silently ignored
 				rulez = [rulez] if isinstance(rulez, str) else rulez
 				chainz[chain][1].append((None, name))
 				chainz[chain][1].append((pre, rulez))
 
 	# Form actual tables
-	chainz = sorted(chainz.iteritems(), key=lambda x: x[0].lower() in builtins)
-	for name,chain in chainz:
-		policy,ruleset = chain
+	chainz = sorted(chainz.viewitems(), key=lambda x: x[0].lower() in builtins)
+	for name, chain in chainz:
+		policy, ruleset = chain
 		if name.lower() in builtins: name = name.upper()
 		else: policy = '-'
 
 		# Policy header (like ':INPUT ACCEPT [0:0]')
 		policy_gen = lambda policy: '\n:%s %s '%(name, policy.upper()) + '[0:0]\n'
 		try:
-			v4,v6 = policy
-			core.append(policy_gen(v4), 'v4')
-			core.append(policy_gen(v6), 'v6')
+			v4, v6 = policy
+			dump.append(policy_gen(v4), 'v4')
+			dump.append(policy_gen(v6), 'v6')
 		except (TypeError, ValueError): add(policy_gen(policy))
 
 		header = None
-		for base,rulez in ruleset:
+		for base, rulez in ruleset:
 			if rulez:
 				for rule in rulez: # rule mangling
 
@@ -273,13 +272,13 @@ for table,chainz in cfg['tablez'].iteritems():
 						header = '# '+rulez
 						break
 					elif cfg['stateful'] and rule and '--state'\
-							not in rule and  name == 'INPUT' and '--dport' in rule:
+							not in rule and name == 'INPUT' and '--dport' in rule:
 						pre = base + ('--state', 'NEW')
 					else: pre = base
 
 					try: # check rule for magical, inserted by hand, proto marks
-						v, core.mark = vmark.findall(rule)[0]
-					except (IndexError, TypeError): core.mark = None
+						v, dump.mark = vmark.findall(rule)[0]
+					except (IndexError, TypeError): dump.mark = None
 					else: rule = rule.replace(v, '') # Strip magic
 
 					# Special check for ipset module
@@ -361,7 +360,7 @@ for v in ('v4', 'v6'):
 		old_table, old_essence = pull_table(v)
 
 		# Push new table
-		try: push_table(v, core.fetch(v))
+		try: push_table(v, dump.fetch(v))
 		except TableUpdateError as err: log.error(bytes(err))
 
 		# Pull new table in iptables-save format, to compare against old one
@@ -396,4 +395,4 @@ for v in ('v4', 'v6'):
 
 	else:
 		log.info('%s table:'%v)
-		sys.stdout.write(core.fetch(v)+'\n\n')
+		sys.stdout.write(dump.fetch(v)+'\n\n')
