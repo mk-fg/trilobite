@@ -174,7 +174,7 @@ tablez:
         output-ext0:
           - -d 90.157.91.1
           - -d 10.0.49.1
-      telenet_segnet_drop: # dangerous high-bandwidth connections via local telenet router
+      telenet_segnet_drop:
         input-ppp2:
           - -s 90.157.91.0/24 -
           - -s 90.157.40.128/25 -
@@ -262,4 +262,3 @@ tablez:
       finish:
         input: x
         forward: x
-
