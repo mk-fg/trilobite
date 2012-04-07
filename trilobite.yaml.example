@@ -1,0 +1,265 @@
+policy: +
+stateful: true
+
+fs:
+  bakz:
+    v4: /var/lib/iptables/rules.backup.%s
+    v6: /var/lib/ip6tables/rules.backup.%s
+    sets: /var/lib/ipsets/sets.backup.%s
+    keep: 10
+    delay: 5
+  bin:
+    v4_pull: /sbin/iptables-save
+    v4_push: /sbin/iptables-restore
+    v6_pull: /sbin/ip6tables-save
+    v6_push: /sbin/ip6tables-restore
+    ipset: /usr/sbin/ipset
+    at: /usr/bin/at
+    diff: /usr/bin/colordiff -u
+
+
+sets:
+  blocked:
+    type: iphash
+    contents:
+
+
+tablez:
+  raw:
+    prerouting: #- -p udp --dport 6881 -j NOTRACK
+      #-p udp --dport 8452:8454 -j TRACE
+    output: #-p udp --sport 6881 -j NOTRACK
+
+  mangle:
+    prerouting:
+    input:
+    forward:
+    output:
+    postrouting:
+
+  nat: # IPv4-only NAT table
+    prerouting:
+    postrouting:
+    output:
+
+    svc:
+      ssh_forwarding:
+        prerouting:
+          - -p tcp --dport 8110 -j DNAT --to-destination 192.168.0.10:22
+          - -p tcp --dport 8112 -j DNAT --to-destination 192.168.0.12:22
+          - -p tcp --dport 8113 -j DNAT --to-destination 192.168.0.13:22
+      azureus: # to coercion
+        prerouting:
+          - -p tcp/udp --dport 28637 -j DNAT --to-destination 192.168.0.13
+          - -p udp --dport 28638 -j DNAT --to-destination 192.168.0.13
+      spring_torrent: # to sacrilege
+        prerouting: -i ext1 -p tcp/udp --dport 8455 -j DNAT --to-destination 192.168.0.12
+      gateway:
+        postrouting:
+          - -s 192.168.0.10 -j MASQUERADE # anathema
+          - -s 192.168.0.12 -j MASQUERADE # sacrilege
+          - -s 192.168.0.13 -j MASQUERADE # coercion
+
+
+  filter:
+
+    input:
+      - -v4 --match-set blocked src -
+      - --state RELATED,ESTABLISHED
+      - -v4 -p icmp
+      - -v6 -p icmpv6
+    forward:
+      - -v4 --match-set blocked src -
+      - -v4 --match-set blocked dst -
+      - -v4 -p icmp
+      - -v6 -p icmpv6
+      # New connz
+      - -i lan -j core_in
+      # Known nets' reverse traffic
+      - -o lan --state RELATED,ESTABLISHED -j core_out
+      # Self-redirect for internal nets
+      - -p tcp -d 2001:470:1f0a:11de::2
+    output:
+      - -v4 --match-set blocked dst -
+      - --state RELATED,ESTABLISHED
+      - -v4 -p icmp
+      - -v6 -p icmpv6
+
+
+    # These chains are for internal IPz that can be
+    #  forwarded to external interfaces, so they'll look as
+    #  an intruder w/o ipsec wrapping
+    core_exc_in:
+      - -s 192.168.0.0/28 <
+      - -s 2001:470:1f0b:11de::10/124 <
+      -
+    core_exc_out:
+      - -d 192.168.0.0/28 <
+      - -d 2001:470:1f0b:11de::10/124 <
+      -
+
+    # Exceptions to ipsec-only rule, shouldn't be many of them
+    core_in:
+      - -s 2001:470:1f0b:11de::1 # self gw
+      - <
+    core_out:
+      - -d 192.168.0.9 # wlan.v4c
+      - -d 2001:470:1f0b:11de::1 # self gw
+      - <
+
+
+    svc:
+
+      loopback:
+        input-lo: +
+
+      forwarding_confined:
+        output:
+          # possible ssh forwarding
+          - --uid-owner rat -
+          - --uid-owner minion -
+          # confined to nfs
+          - -d 127.0.0.1/32 -p tcp --dport nfs --uid-owner leech
+          - -d 127.0.0.1/32 -p tcp --dport sunrpc --uid-owner leech
+          - -d 127.0.0.1/32 -p tcp --dport nfs ! --uid-owner leech x
+          - --uid-owner leech x
+          # confined to pgsql, and only this user can access this interface
+          - -d ::2/128 -p tcp --dport postgresql --uid-owner postgres
+          - -d ::2/128 -p tcp --dport postgresql ! --uid-owner postgres x
+          - --uid-owner postgres x
+
+      gateway: # non-ipsec connz
+        forward:
+          - -i lan -s 192.168.0.10
+          - -i lan -s 192.168.0.12
+          - -i lan -s 192.168.0.13
+          - -o lan --state RELATED,ESTABLISHED -d 192.168.0.10
+          - -o lan --state RELATED,ESTABLISHED -d 192.168.0.12
+          - -o lan --state RELATED,ESTABLISHED -d 192.168.0.13
+
+      ssh:
+        input:
+          - -v4 -p tcp --dport ssh --state NEW \
+            -m recent --update --seconds 60 --hitcount 10 --name ssh_bots --rsource -
+          - -v4 -p tcp --dport ssh --state NEW -m recent --set --name ssh_bots --rsource |
+          - -p tcp --dport ssh
+        forward:
+          - -p tcp --dport ssh
+          - -p tcp -d 192.168.0.10 --dport 8110
+          - -p tcp -d 192.168.0.12 --dport 8112
+          - -p tcp -d 192.168.0.13 --dport 8113
+
+      ipsec_raw:
+        input:
+          - -p esp/ah
+          - -p udp --dport isakmp,ipsec-nat-t
+        output:
+          - -p esp/ah
+          - -p udp --dport isakmp,ipsec-nat-t
+
+      ipsec_blanket:
+        input-lan: -m policy --dir in --pol ipsec --mode transport
+        output-lan: -m policy --dir out --pol ipsec --mode transport
+
+      core:
+        input-lan: -j core_in
+        output-lan: -j core_out
+
+      6to4_forwarding: -v6 -i tot
+
+      telenet_gateway:
+        input-ext0:
+          - -s 90.157.91.1 --mac-source 00:16:E6:41:AD:86 --state RELATED,ESTABLISHED
+          - -s 10.0.49.1 --mac-source 00:1C:C0:4B:02:BD --state RELATED,ESTABLISHED
+        output-ext0:
+          - -d 90.157.91.1
+          - -d 10.0.49.1
+      telenet_segnet_drop: # dangerous high-bandwidth connections via local telenet router
+        input-ppp2:
+          - -s 90.157.91.0/24 -
+          - -s 90.157.40.128/25 -
+        output-ppp2:
+          - -d 90.157.91.0/24 -
+          - -d 90.157.40.128/25 -
+
+      squid:
+        input:
+          - -p tcp -s 79.172.24.46 --dport 8100,8199
+          - -p tcp -s 195.58.1.141 --dport 8100,8199
+
+      core_guest: # used for PXE boot
+        input-lan:
+          - -s 192.168.0.0/28 -p tcp --dport http,ssh
+          - -s 192.168.0.0/28 -p tcp/udp --dport domain
+
+
+      co-located_connz_drop:
+        input-lan:
+          - -s 192.168.0.0/16 -j core_exc_in
+          - -s 2001:470:1f0b:11de::/64 -j core_exc_in
+        output-lan:
+          - -d 192.168.0.0/16 -j core_exc_out
+          - -d 2001:470:1f0b:11de::/64 -j core_exc_out
+
+
+      named: -p tcp/udp --dport domain
+      ntp: -p udp --dport ntp
+      mail: -p tcp --dport smtp,pop3,imap,pop3s,imaps
+      mld_head: -p tcp --dport 4001
+
+      intranet_connz_reject:
+        input-ppp2:
+          - -s 90.157.0.0/17 x
+          - -s 87.224.128.0/17 x
+          - -v4
+
+
+      local_torrent:
+        - -p udp --dport 6881
+        - -p tcp --dport 6880:6999
+
+      mlnet:
+        #  ed2k
+        - -p tcp --dport 4672
+        - -p udp --dport 4676
+        #  overnet
+        - -p tcp/udp --dport 4682
+        #  kadmelia
+        - -p tcp/udp --dport 6419
+        # gnutella
+        - -p tcp/udp --dport 6346
+        - -p tcp/udp --dport 6347
+        - -p tcp/udp --dport 6348
+        - -p tcp/udp --dport 6349
+        #  rest of 'em
+        - -p udp --dport 4665
+        - -p tcp --dport 6881
+        - -p tcp --dport 6882
+        - -p tcp --dport 1214
+        - -p tcp --dport 9999
+        - -p tcp --dport 2234
+        - -p tcp/udp --dport 4444
+
+      irc: -p tcp/udp --dport 6667
+      irc_dcc: -p tcp/udp --dport 6800:6879
+
+      web: -p tcp --dport http,https,ftp,ftp-data
+      jabber: -p tcp --dport xmpp-client,xmpp-server,5223
+      git-daemon: -p tcp --dport git
+      rsync: -p tcp/udp --dport rsync
+      postgresql: -p tcp --dport postgresql
+
+      misc_forwarding:
+        forward:
+          # Azureus to coercion
+          - -p tcp/udp -d 192.168.0.13 --dport 28637
+          - -p udp -d 192.168.0.13 --dport 28638
+          # Spring torrent to sacrilege
+          - -p tcp/udp -d 192.168.0.12 --dport 8455
+
+      blackhole_firewall: -p tcp/udp --dport 0:1023 -
+
+      finish:
+        input: x
+        forward: x
+
