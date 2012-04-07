@@ -1,30 +1,34 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from optparse import OptionParser
-parser = OptionParser(usage='%prog [options]')
-parser.add_option('-n', '--no-revert', action='store_true',
-	help='Do not schedule tables revert (in case of ssh lock),'
-		' not recommended, since you never know when firewall may lock itself up.')
-parser.add_option('-x', '--no-ipsets', action='store_true',
-	help='Do not process ipsets and related rules.')
-parser.add_option('-s', '--summary', action='store_true',
-	help='Show diff between old and new tables afterwards.')
-parser.add_option('-d', '--dump', action='store_true',
-	help='No changes, just dump resulting tables to stdout.')
-parser.add_option('-c', '--check-diff', action='store_true',
-	help='No changes, return 0 ("identical") or 2 status (not 1, so it wont be'
-		' confused with any generic error), depending on whether there are changes'
-		' in configuration waiting to be applied (configuration differs from current'
-		' iptables settings). Does not performs any ipset manipulations/comparisons.'
-		' It is done in somewhat DANGEROUS way - tables get swapped for a short time.')
-optz, argz = parser.parse_args()
-
 
 import itertools as it, operator as op, functools as ft
 from subprocess import Popen, PIPE, STDOUT
 from collections import defaultdict
 import os, sys, yaml, re
+
+import argparse
+parser = argparse.ArgumentParser(
+	description='Apply or check netfilter rules from/against configuration file.')
+parser.add_argument('-n', '--no-revert', action='store_true',
+	help='Do not schedule tables revert (in case of ssh lock),'
+		' not recommended, since you never know when firewall may lock itself up.')
+parser.add_argument('-x', '--no-ipsets', action='store_true',
+	help='Do not process ipsets and related rules.')
+parser.add_argument('-s', '--summary', action='store_true',
+	help='Show diff between old and new tables afterwards.')
+parser.add_argument('-d', '--dump', action='store_true',
+	help='No changes, just dump resulting tables to stdout.')
+parser.add_argument('-t', '--check-diff', action='store_true',
+	help='No changes, return 0 ("identical") or 2 status (not 1, so it wont be'
+		' confused with any generic error), depending on whether there are changes'
+		' in configuration waiting to be applied (configuration differs from current'
+		' iptables settings). Does not performs any ipset manipulations/comparisons.'
+		' It is done in somewhat DANGEROUS way - tables get swapped for a short time.')
+parser.add_argument('-c', '--conf',
+	default=os.path.realpath(os.path.splitext(__file__)[0])+'.yaml',
+	help='Path to configuration file (deafult: %(default)s).')
+optz = parser.parse_args()
 
 import logging as log
 log.basicConfig(level=log.INFO)
@@ -49,7 +53,7 @@ pex = re.compile('(?<=-p\s)((\w+/)+\w+)'),\
 	re.compile('(?<=port\s)((\d+/)+\d+)') # protocol extension
 vmark = re.compile('(\s*-(v[46]))(?=\s|$)') # IP version mark
 
-cfgs = open(os.path.realpath(os.path.splitext(__file__)[0])+'.yaml').read()
+cfgs = open(optz.conf).read()
 cfgs = cfgs.replace('\t', '  ') # I tend to use tabs, which are not YAML-friendly
 cfgs = re.sub(re.compile(' *\\\\\n\s*', re.M), ' ', cfgs)
 cfg = yaml.load(cfgs)
