@@ -5,7 +5,7 @@
 import itertools as it, operator as op, functools as ft
 from subprocess import Popen, PIPE, STDOUT
 from collections import defaultdict
-import os, sys, yaml, re
+import os, sys, yaml, re, types
 
 import argparse
 parser = argparse.ArgumentParser(
@@ -26,9 +26,18 @@ parser.add_argument('-t', '--check-diff', action='store_true',
 		' iptables settings). Does not performs any ipset manipulations/comparisons.'
 		' It is done in somewhat DANGEROUS way - tables get swapped for a short time.')
 parser.add_argument('-c', '--conf',
-	default=os.path.splitext(os.path.realpath(__file__))[0]+'.yaml',
+	default=[
+		os.path.splitext(os.path.realpath(__file__))[0]+'.yaml',
+		'/etc/trilobite.yaml' ],
 	help='Path to configuration file (default: %(default)s).')
 optz = parser.parse_args()
+
+try:
+	if not isinstance(optz.conf, types.StringTypes):
+		optz.conf = filter(os.path.exists, optz.conf)[0]
+	elif not os.path.exists(optz.conf): raise IndexError
+except IndexError:
+	parser.error('Unable to find configuration file at {}'.format(optz.conf))
 
 import logging as log
 log.basicConfig(level=log.INFO)
