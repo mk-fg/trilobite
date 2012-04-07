@@ -26,8 +26,8 @@ parser.add_argument('-t', '--check-diff', action='store_true',
 		' iptables settings). Does not performs any ipset manipulations/comparisons.'
 		' It is done in somewhat DANGEROUS way - tables get swapped for a short time.')
 parser.add_argument('-c', '--conf',
-	default=os.path.realpath(os.path.splitext(__file__)[0])+'.yaml',
-	help='Path to configuration file (deafult: %(default)s).')
+	default=os.path.splitext(os.path.realpath(__file__))[0]+'.yaml',
+	help='Path to configuration file (default: %(default)s).')
 optz = parser.parse_args()
 
 import logging as log
