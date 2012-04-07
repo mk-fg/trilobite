@@ -135,13 +135,13 @@ Just an svc name with a simple allow-all ipv6 rule:
 
 Such rules will go into INPUT chain by default.
 
-	telenet_segnet_drop:
-		input-ppp2:
-			- -s 90.157.91.0/24 -
-			- -s 90.157.40.128/25 -
-		output-ppp2:
-			- -d 90.157.91.0/24 -
-			- -d 90.157.40.128/25 -
+		telenet_segnet_drop:
+			input-ppp2:
+				- -s 90.157.91.0/24 -
+				- -s 90.157.40.128/25 -
+			output-ppp2:
+				- -d 90.157.91.0/24 -
+				- -d 90.157.40.128/25 -
 
 Bunch of ipv4 DROP rules for ppp2 interface.
 
