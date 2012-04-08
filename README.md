@@ -31,15 +31,26 @@ schedule rules' revert in a few minutes, which should be disabled manually, if
 ssh (or whatever access) wasn't accidentally blocked by the new rules.
 
 
+
 ### Configuration
+
+
+##### Chains, policies and generic rules
 
 Should be pretty intuitive from the yaml example, otherwise some parts are
 explained below.
 
+If there's no explicit --state spec in rule, ALL rules will get "-m state
+--state NEW". Basically, that means that all such rules act on per-connection
+(as opposed to per-packet) basis by default.
+That can be disabled via "stateful" configuration switch.
+
 Start of the rule definitions section and filter table init - you can actually
 replace chain definition, like "input:" by "input/-" to set policy to DROP, or
-"somechain/x" for REJECT. "+" is ACCEPT, which is default, same as for rules, if
-not overridden.
+"somechain/x" for REJECT, "/+" for ACCEPT, same as for rules.
+
+There are also special "somechain/4" and "somechain/6" policy specs, which mean
+"ACCEPT for v4, DROP for v6" and the reverse thing respectively.
 
 	tablez:
 		filter:
@@ -57,7 +68,11 @@ Three rules in input, first in this chain, will be same as...
 	$IPT4 -t filter -A INPUT -p icmp -j ACCEPT
 	$IPT6 -t filter -A INPUT -p icmp6 -j ACCEPT
 
-...generally-used bash code will produce. Note the -v4 and -v6 switches.
+...generally-used bash code will produce.
+
+Note the "-v4" and "-v6" switches and that "-j ACCEPT" is added by default to
+non-empty rules (which are special, and mean "-j DROP") if no "-", "x", "<" or
+"|" specified in the end.
 
 Empty chain definitions (as with "output" here) are fine, too.
 
@@ -91,7 +106,11 @@ Yep, last one is an empty rule, which will be interpreted as "-" - "-j DROP".
 	- +
 	- x
 
-Last pieces of syntax magic, expand to "-j ACCEPT" and "-j REJECT" respectively.
+Briefly described above syntax magic - expands to "-j ACCEPT" and "-j REJECT"
+respectively.
+
+
+##### Service rules
 
 	svc:
 
@@ -118,10 +137,10 @@ one-liners.
 
 Result of these should be roughly this:
 
-	$IPT4 -A INPUT -i lo -j ACCEPT
-	$IPT6 -A INPUT -i lo -j ACCEPT
-	$IPT4 -A OUTPUT -o lo -j ACCEPT
-	$IPT6 -A OUTPUT -o lo -j ACCEPT
+	$IPT4 -A INPUT -i lo -m state --state NEW -j ACCEPT
+	$IPT6 -A INPUT -i lo -m state --state NEW -j ACCEPT
+	$IPT4 -A OUTPUT -o lo -m state --state NEW -j ACCEPT
+	$IPT6 -A OUTPUT -o lo -m state --state NEW -j ACCEPT
 
 "-j action/chain" works as in vanilla tables:
 
@@ -143,11 +162,12 @@ Such rules will go into INPUT chain by default.
 				- -d 90.157.91.0/24 -
 				- -d 90.157.40.128/25 -
 
-Bunch of ipv4 DROP rules for ppp2 interface.
+Bunch of IPv4 DROP rules for ppp2 interface.
 
 		ssh: -p tcp --dport ssh
 
-Simple "open port" rule, sufficient for 90% of services.
+Simple "open port" rule (for ssh on port 22, in this case), sufficient for 90%
+of services.
 
 		mail: -p tcp --dport smtp,pop3,imap,pop3s,imaps
 
@@ -167,6 +187,31 @@ Can be a last "reject-everything-else" rule.
 
 There's also support for ipsets and some other modules. Check out the beginning
 of the code for up2date expansion definitions.
+
+
+##### Metrics
+
+Only special syntax which is not translated to iptables at all atm is
+"--metrics" switch:
+
+		mcast: --pkt-type multicast --metrics media.packets
+		...
+		pulse: -s 192.168.0.163 -p tcp --dport 4712,4713 --metrics pulse.connz/media.packets
+
+It builds a special file (location can be specified in config) with the "chain
+rule_number name" syntax, example:
+
+	INPUT 8 media.packets
+	INPUT 12 sshd.connz
+	INPUT 13 media.packets
+	INPUT 13 pulse.connz
+
+...which can be used later with netfilter counters (think "iptables -L INPUT
+-vn") to produce stats for specific types of traffic on a local machine.
+More complicated setups can probably use fwmarks (think "-j MARK").
+
+
+### Requirements
 
 Uses [PyYAML](http://pyyaml.org/wiki/PyYAML) module along with
 [iptables](http://www.netfilter.org/) and [ipset](http://ipset.netfilter.org/)

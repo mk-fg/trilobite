@@ -3,9 +3,9 @@ stateful: true
 
 fs:
   bakz:
-    v4: /var/lib/iptables/rules.backup.%s
-    v6: /var/lib/ip6tables/rules.backup.%s
-    sets: /var/lib/ipsets/sets.backup.%s
+    v4: '/var/lib/iptables/rules.backup.{num}'
+    v6: '/var/lib/ip6tables/rules.backup.{num}'
+    sets: '/var/lib/ip6tables/ipsets.backup.{num}'
     keep: 10
     delay: 5
   bin:
@@ -16,6 +16,9 @@ fs:
     ipset: /usr/sbin/ipset
     at: /usr/bin/at
     diff: /usr/bin/colordiff -u
+  metrics:
+    v4: /var/lib/iptables/metrics.list
+    v6: /var/lib/ip6tables/metrics.list
 
 
 sets:

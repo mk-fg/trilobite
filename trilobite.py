@@ -30,6 +30,7 @@ parser.add_argument('-c', '--conf',
 		os.path.splitext(os.path.realpath(__file__))[0]+'.yaml',
 		'/etc/trilobite.yaml' ],
 	help='Path to configuration file (default: %(default)s).')
+parser.add_argument('--debug', action='store_true', help='Verbose operation mode.')
 optz = parser.parse_args()
 
 try:
@@ -39,8 +40,10 @@ try:
 except IndexError:
 	parser.error('Unable to find configuration file at {}'.format(optz.conf))
 
-import logging as log
-log.basicConfig(level=log.INFO)
+import logging
+logging.basicConfig( level=logging.INFO
+	if not optz.debug else logging.DEBUG )
+log = logging.getLogger()
 
 os.umask(077)
 
@@ -55,7 +58,7 @@ extents = {
 	'--match-set': '-m set',
 	'--pkt-type': '-m pkttype',
 	'--uid-owner': '-m owner' }
-extents = list( (re.compile('(?<=\s)((! )?'+k+')'), '%s \\1'%v)
+extents = list( (re.compile('(?<=\s)((! )?'+k+')'), '{} \\1'.format(v))
 	for k,v in extents.viewitems() )
 pex = re.compile('(?<=-p\s)((\w+/)+\w+)'),\
 	re.compile('(?<=port\s)((\d+/)+\d+)') # protocol extension
@@ -69,56 +72,72 @@ cfg = yaml.load(cfgs)
 
 class Tables:
 	v4, v6 = list(), list()
+	rule_counts = dict(v4=defaultdict(int), v6=defaultdict(int))
 	v4_ext = v6_ext = None # comment flags (to skip repeating comments)
 	v4_mark = re.compile('\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}')
 	v6_mark = re.compile('[a-f0-9]{0,4}::([a-f0-9]{1,4}|/)') # far from perfect, but should do
 	mark = None
+	metrics = set()
 
-	def append(self, rules, v=None):
+	def append(self, lines, v=None, chain=None, metrics=None):
 		if not v:
 			if self.mark: # rule was hand-marked with proto version
 				v = self.mark
 				self.mark = None
 			else: # auto-determine if it's valid for each table
-				if not self.v6_mark.search(rules): v = 'v4'
-				if not self.v4_mark.search(rules):
+				if not self.v6_mark.search(lines): v = 'v4'
+				if not self.v4_mark.search(lines):
 					v = None if v else 'v6' # empty value means both tables
 		for v in (('v4', 'v6') if not v else (v,)):
 			table = getattr(self, v)
-			if rules[0] == '#': setattr(self, '%s_ext'%v, rules)
+			if lines[0] == '#': setattr(self, '{}_ext'.format(v), lines)
 			else:
-				ext = getattr(self, '%s_ext'%v)
+				ext = getattr(self, '{}_ext'.format(v))
 				if ext:
 					table.append(ext)
-					setattr(self, '%s_ext'%v, None)
-				table.append(rules)
+					setattr(self, '{}_ext'.format(v), None)
+				table.append(lines)
+				if chain:
+					rule_counts = self.rule_counts[v]
+					log.debug('LC-{}: {!r}'.format(v,lines))
+					lines_list = filter(None, (lines if isinstance( lines,
+						types.StringTypes ) else '\n'.join(lines)).splitlines())
+					if metrics:
+						if isinstance(metrics, types.StringTypes): metrics = [metrics]
+						for i in lines_list:
+							rule_counts[chain] += 1
+							for metric in metrics:
+								self.metrics.add((v, chain, rule_counts[chain], metric))
+					else: rule_counts[chain] += len(lines_list)
+				else: log.debug('L-{}: {!r}'.format(v, lines))
 
 	def fetch(self, v=None):
-		str = '\n'.join
-		return (str(self.v4), str(self.v6)) if not v else str(getattr(self, v))
+		cat = '\n'.join
+		return (cat(self.v4), cat(self.v6)) if not v else cat(getattr(self, v))
 
 dump = Tables()
 
 
 def chainspec(chain):
 	# Chain policy specification (like'input-lan/-', 'input/6' or 'input/+')
-	if '/' in chain: chain,policy = chain.split('/', 1)
+	if '/' in chain: chain, policy = chain.rsplit('/', 1)
 	else: policy = cfg['policy']
 	if not policy or policy == '-': policy = 'DROP'
+	elif policy == 'x': policy = 'REJECT'
 	elif policy.isdigit():
 		if policy == '4': policy = ('ACCEPT', 'DROP')
 		elif policy == '6': policy = ('DROP', 'ACCEPT')
-		else: raise ValueError, 'Incorect policy specification'
+		else: raise ValueError('Incorect policy specification')
 	else: policy = 'ACCEPT'
 
 	if '-' in chain: # like 'input-lan', for chain-global interface specification (useful in svc rules)
 		if chain.startswith('input'): rule = '-i'
 		elif chain.startswith('output'): rule = '-o'
-		else: rule, pre = None, ()
+		else: rule, pre = None, list()
 		if rule:
-			chain, pre = chain.split('-', 1)
-			pre = (rule, pre)
-	else: pre = ()
+			chain, pre = chain.rsplit('-', 1)
+			pre = [rule, pre]
+	else: pre = list()
 
 	return chain, policy, pre
 
@@ -185,7 +204,7 @@ if not optz.no_ipsets and cfg.get('sets'):
 		if old_essence != new_essence:
 			# Backup old sets in backup.0 slot, rotating the rest of them
 			i_slot = None
-			for i in sorted(( cfg['fs']['bakz']['sets']%i
+			for i in sorted(( cfg['fs']['bakz']['sets'].format(num=i)
 					for i in xrange(cfg['fs']['bakz']['keep']) ), reverse=True):
 				if os.path.exists(i) and i_slot: os.rename(i, i_slot)
 				i_slot = i
@@ -215,7 +234,7 @@ for table, chainz in cfg['tablez'].viewitems():
 	add('*'+table) # table header (like '*filter')
 
 	try: svc = chainz.pop('svc')
-	except KeyError: svc = {}
+	except KeyError: svc = dict()
 
 	# Form chainspec / initial rules, giving chains a 'clean', separated from chainspec, names
 	for chain in chainz.keys():
@@ -243,7 +262,7 @@ for table, chainz in cfg['tablez'].viewitems():
 			except AttributeError: pre = [('input', svc[name])] # it's just a list of rules, defaults to input chain
 			for chain, rulez in pre:
 				chain, policy, pre = chainspec(chain) # policy here is silently ignored
-				rulez = [rulez] if isinstance(rulez, str) else rulez
+				rulez = [rulez] if isinstance(rulez, types.StringTypes) else rulez
 				chainz[chain][1].append((None, name))
 				chainz[chain][1].append((pre, rulez))
 
@@ -255,7 +274,7 @@ for table, chainz in cfg['tablez'].viewitems():
 		else: policy = '-'
 
 		# Policy header (like ':INPUT ACCEPT [0:0]')
-		policy_gen = lambda policy: '\n:%s %s '%(name, policy.upper()) + '[0:0]\n'
+		policy_gen = lambda policy: '\n:{} {} '.format(name, policy.upper()) + '[0:0]\n'
 		try:
 			v4, v6 = policy
 			dump.append(policy_gen(v4), 'v4')
@@ -265,15 +284,18 @@ for table, chainz in cfg['tablez'].viewitems():
 		header = None
 		for base, rulez in ruleset:
 			if rulez:
+				if base == None: # it's a comment: store till first valid rule
+					header = '# ' + rulez
+					continue
+
+				assert not isinstance(rulez, types.StringTypes)
 				for rule in rulez: # rule mangling
+					log.debug('R: {!r}'.format(rule))
 
 					# Rule base: comment / state extension
-					if base == None: # it's a comment: store till first valid rule
-						header = '# '+rulez
-						break
-					elif cfg['stateful'] and rule and '--state'\
+					if cfg['stateful'] and rule and '--state'\
 							not in rule and name == 'INPUT' and '--dport' in rule:
-						pre = base + ('--state', 'NEW')
+						pre = base + ['--state', 'NEW']
 					else: pre = base
 
 					try: # check rule for magical, inserted by hand, proto marks
@@ -281,29 +303,30 @@ for table, chainz in cfg['tablez'].viewitems():
 					except (IndexError, TypeError): dump.mark = None
 					else: rule = rule.replace(v, '') # Strip magic
 
-					# Special check for ipset module
-					if rule and '--match-set' in rule:
-						ipset = next(it.ifilter(None, rule.split('--match-set', 1)[-1].split()))
+					rule = rule.split() if rule else list()
+					# Check for ipset existence
+					try: k = rule.index('--match-set')
+					except ValueError: ipset = None
+					else:
+						ipset = rule[k+1]
 						if ipset not in sets:
 							log.warn('Skipping rule for invalid/unknown ipset "{}"'.format(ipset))
 							continue
+					# Metrics are split into a separate list
+					try: k = rule.index('--metrics')
+					except ValueError: metrics = None
+					else: metrics, rule = rule[k+1].split('/'), rule[:k] + rule[k+2:]
 
 					# Final rules (like '-A INPUT -j DROP')
-					if not rule: rule = '-j', 'DROP'
-					elif len(rule) == 1:
-						if rule == 'x': rule = '-j', 'REJECT'
-						elif rule == '<': rule = '-j', 'RETURN'
-						else: rule = '-j', 'ACCEPT'
-					# Rule actions
-					elif rule.endswith(' x'): rule = rule[:-2], '-j', 'REJECT'
-					elif rule.endswith(' -'): rule = rule[:-2], '-j', 'DROP'
-					elif rule.endswith(' <'): rule = rule[:-2], '-j', 'RETURN'
-					elif rule.endswith(' |'): rule = rule[:-2],
-					elif '-j ' not in rule: rule = rule, '-j', 'ACCEPT'
-					# Full rule, no action mangling is necessary
-					else: rule = (rule,)
+					if not rule: rule = ['-j', 'DROP']
+					elif rule[-1] == 'x': rule = rule[:-1] + ['-j', 'REJECT']
+					elif rule[-1] == '-': rule = rule[:-1] + ['-j', 'DROP']
+					elif rule[-1] == '<': rule = rule[:-1] + ['-j', 'RETURN']
+					elif rule[-1] == '+': rule = rule[:-1] + ['-j', 'ACCEPT']
+					elif rule[-1] == '|': rule = rule[:-1]
+					elif '-j' not in rule: rule += ['-j', 'ACCEPT']
 
-					rule = ' '.join(('-A', name) + pre + rule) # rule composition
+					rule = ' '.join(['-A', name] + pre + rule) # rule composition
 					for k,v in extents: # rule extension (for example, adds '-m ...', where necessary)
 						if v in rule: continue
 						rule = k.sub(v, rule)
@@ -322,7 +345,7 @@ for table, chainz in cfg['tablez'].viewitems():
 						add(header)
 						header = None
 
-					add(rule) # ta da!
+					add(rule, chain=name, metrics=metrics) # ta da!
 
 	add('\nCOMMIT\n\n') # table end marker
 
@@ -354,7 +377,7 @@ def push_table(v, table):
 	if iptables.wait(): raise TableUpdateError('Failed to update table')
 
 
-for v in ('v4', 'v6'):
+for v in 'v4', 'v6':
 	if not optz.dump:
 		# Pull the old table, to check if it's similar to new one (no backup needed in that case)
 		old_table, old_essence = pull_table(v)
@@ -370,7 +393,7 @@ for v in ('v4', 'v6'):
 			if not optz.check_diff:
 				# Backup old table in backup.0 slot, rotating the rest of them
 				i_slot = None
-				for i in sorted(( cfg['fs']['bakz'][v]%i
+				for i in sorted(( cfg['fs']['bakz'][v].format(num=i)
 						for i in xrange(cfg['fs']['bakz']['keep']) ), reverse=True):
 					if os.path.exists(i) and i_slot: os.rename(i, i_slot)
 					i_slot = i
@@ -380,7 +403,7 @@ for v in ('v4', 'v6'):
 
 			# Generate diff, if requested
 			if optz.summary:
-				log.info('%s table:'%v)
+				log.info('{} table:'.format(v))
 				diff_summary(old_essence, new_essence)
 
 			# First diff means we're done if that's what is requested
@@ -389,10 +412,29 @@ for v in ('v4', 'v6'):
 			# Schedule table revert if no commit action will be issued (to ensure that tables are in the sane state)
 			if not optz.no_revert:
 				at = Popen([cfg['fs']['bin']['at'], 'now', '+', str(cfg['fs']['bakz']['delay']), 'minutes'], stdin=PIPE)
-				at.stdin.write('%s < %s\n'%(cfg['fs']['bin'][v+'_push'], i)) # restore from latest backup
+				at.stdin.write('{} < {}\n'.format(cfg['fs']['bin'][v+'_push'], i)) # restore from latest backup
 				at.stdin.close()
 				at.wait()
 
 	else:
-		log.info('%s table:'%v)
+		log.info('{} table:'.format(v))
 		sys.stdout.write(dump.fetch(v)+'\n\n')
+
+
+if dump.metrics:
+	metric_repr = lambda metric: ' '.join(it.imap(bytes, metric))
+
+	if optz.dump:
+		log.info('Metrics:')
+		metrics_dump = '\n'.join(it.imap(metric_repr, sorted(dump.metrics))) + '\n'
+		sys.stdout.write(metrics_dump)
+
+	else:
+		metrics = dict()
+		for line in sorted(dump.metrics):
+			metrics.setdefault(line[0], list()).append(line[1:])
+		for v, metrics in metrics.viewitems():
+			try: dst = cfg['fs']['metrics'][v]
+			except KeyError: continue
+			metrics_dump = '\n'.join(it.imap(metric_repr, sorted(metrics))) + '\n'
+			open(dst, 'wb').write(metrics_dump)
