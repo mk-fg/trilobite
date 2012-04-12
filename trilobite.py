@@ -71,23 +71,20 @@ cfg = yaml.load(cfgs)
 
 
 class Tables:
-	v4, v6 = list(), list()
-	rule_counts = dict(v4=defaultdict(int), v6=defaultdict(int))
 	v4_ext = v6_ext = None # comment flags (to skip repeating comments)
 	v4_mark = re.compile('\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}')
 	v6_mark = re.compile('[a-f0-9]{0,4}::([a-f0-9]{1,4}|/)') # far from perfect, but should do
-	mark = None
-	metrics = set()
 
-	def append(self, lines, v=None, chain=None, metrics=None):
-		if not v:
-			if self.mark: # rule was hand-marked with proto version
-				v = self.mark
-				self.mark = None
-			else: # auto-determine if it's valid for each table
-				if not self.v6_mark.search(lines): v = 'v4'
-				if not self.v4_mark.search(lines):
-					v = None if v else 'v6' # empty value means both tables
+	def __init__(self):
+		self.v4, self.v6 = list(), list()
+		self.rule_counts = dict(v4=defaultdict(int), v6=defaultdict(int))
+		self.metrics = set()
+
+	def append(self, lines, chain=None, v=None, metrics=None):
+		if not v: # auto-determine if it's valid for each table
+			if not self.v6_mark.search(lines): v = 'v4'
+			if not self.v4_mark.search(lines):
+				v = None if v else 'v6' # empty value means both tables
 		for v in (('v4', 'v6') if not v else (v,)):
 			table = getattr(self, v)
 			if lines[0] == '#': setattr(self, '{}_ext'.format(v), lines)
@@ -298,10 +295,10 @@ for table, chainz in cfg['tablez'].viewitems():
 						pre = base + ['--state', 'NEW']
 					else: pre = base
 
-					try: # check rule for magical, inserted by hand, proto marks
-						v, dump.mark = vmark.findall(rule)[0]
-					except (IndexError, TypeError): dump.mark = None
-					else: rule = rule.replace(v, '') # Strip magic
+					# Check rule for proto marks like "-v4" or "-v6"
+					try: v, proto_mark = vmark.findall(rule)[0]
+					except (IndexError, TypeError): proto_mark = None
+					else: rule = rule.replace(v, '') # strip the magic
 
 					rule = rule.split() if rule else list()
 					# Check for ipset existence
@@ -345,7 +342,7 @@ for table, chainz in cfg['tablez'].viewitems():
 						add(header)
 						header = None
 
-					add(rule, chain=name, metrics=metrics) # ta da!
+					add(rule, v=proto_mark, chain=name, metrics=metrics)
 
 	add('\nCOMMIT\n\n') # table end marker
 
