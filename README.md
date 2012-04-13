@@ -223,8 +223,8 @@ That will turn a rule like this:
 
 Into a set of rules:
 
-	-A conn_metrics -m connmark --mark 0x1/0xffffffff
-	-A INPUT -s 192.168.0.163 -p tcp -m multiport --dport 4712,4713 -j CONNMARK --set-xmark 0x1/0xffffffff
+	-A conn_metrics -m connmark --mark 0x1/0x1
+	-A INPUT -s 192.168.0.163 -p tcp -m multiport --dport 4712,4713 -j CONNMARK --or-mark 0x1
 	-A INPUT -s 192.168.0.163 -p tcp -m multiport --dport 4712,4713 -j ACCEPT
 
 With metrics, defined as:

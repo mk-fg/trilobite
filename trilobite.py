@@ -364,18 +364,18 @@ for table, chainz in cfg['tablez'].viewitems():
 					elif '-j' not in rule and '-g' not in rule: rule += ['-j', 'ACCEPT']
 
 					if metrics_mark and metrics:
-						mark = cfg['metrics_conntrack']['shift']
-						mark = '{}/{}'.format(*it.imap( hex,
-							[metrics_mark << mark, 0xffffffff << mark] ))
-						metrics_mark += 1
+						mark = hex(metrics_mark << cfg['metrics_conntrack']['shift'])
+						metrics_mark = metrics_mark << 1 # use unique bits to avoid overriding other marks
+						if metrics_mark > 2**32-1:
+							raise ValueError('Unable to assign unique connmark bit to each metric')
 						k = rule.index('-j')
 						# Add CONNMARK rule with the same filter before the original one
 						rules = (rule[:k] + [ '-j', 'CONNMARK',
-							'--set-xmark', mark ], metrics), (rule, None)
+							'--or-mark', mark ], metrics), (rule, None)
 						# Add --mark check rule with same metrics to the specified chain
 						dump.append(
 							' '.join([ '-A', cfg[ 'metrics_conntrack']['chain'],
-								'-m', 'connmark', '--mark', mark ]),
+								'-m', 'connmark', '--mark', '{}/{}'.format(mark, mark) ]),
 							table, cfg['metrics_conntrack']['chain'], v=proto_mark,
 							metrics=metrics, policy='-' )
 					else: rules = [(rule, metrics)]
