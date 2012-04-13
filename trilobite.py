@@ -71,29 +71,41 @@ cfg = yaml.load(cfgs)
 
 
 class Tables:
-	v4_ext = v6_ext = None # comment flags (to skip repeating comments)
 	v4_mark = re.compile('\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}')
 	v6_mark = re.compile('[a-f0-9]{0,4}::([a-f0-9]{1,4}|/)') # far from perfect, but should do
 
 	def __init__(self):
-		self.v4, self.v6 = list(), list()
 		self.rule_counts = dict(v4=defaultdict(int), v6=defaultdict(int))
-		self.metrics = set()
+		self.metrics = set() # table-chain-num-metric
+		self.header = dict() # used to skip putting empty comments for omitted (for vX table) rules
+		self.chains = dict() # {(vX, table, chain): contents}
+		self.policies = dict() # {(vX, table, chain): policy}
 
-	def append(self, lines, chain=None, v=None, metrics=None):
-		if not v: # auto-determine if it's valid for each table
+	def set_policy(self, table, chain, policy, v=None):
+		if isinstance(policy, types.StringTypes): policy = dict(v4=policy, v6=policy)
+		elif isinstance(policy, tuple): policy = dict(it.izip(['v4', 'v6'], policy))
+		for v in (['v4', 'v6'] if not v else [v]):
+			# chain policy must be consistent, hence assert
+			try: assert self.policies[v,table,chain] == policy[v]
+			except KeyError: self.policies[v,table,chain] = policy[v]
+
+	def append( self, lines, table, chain,
+			policy=None, v=None, metrics=None ):
+		if not v and lines[0] != '#': # auto-determine if it's valid for each table
 			if not self.v6_mark.search(lines): v = 'v4'
 			if not self.v4_mark.search(lines):
 				v = None if v else 'v6' # empty value means both tables
-		for v in (('v4', 'v6') if not v else (v,)):
-			table = getattr(self, v)
-			if lines[0] == '#': setattr(self, '{}_ext'.format(v), lines)
+		for v in (['v4', 'v6'] if not v else [v]):
+			if policy: self.set_policy(table, chain, policy, v)
+			# Init chain
+			try: rules = self.chains[v,table,chain]
+			except KeyError: rules = self.chains[v,table,chain] = list()
+			# Buffer last header, appending it only if there's a rule following
+			if lines[0] == '#': self.header[v,table,chain] = lines
 			else:
-				ext = getattr(self, '{}_ext'.format(v))
-				if ext:
-					table.append(ext)
-					setattr(self, '{}_ext'.format(v), None)
-				table.append(lines)
+				try: rules.append(self.header.pop((v,table,chain)))
+				except KeyError: pass
+				rules.append(lines)
 				if chain:
 					rule_counts = self.rule_counts[v]
 					log.debug('LC-{}: {!r}'.format(v,lines))
@@ -108,9 +120,29 @@ class Tables:
 					else: rule_counts[chain] += len(lines_list)
 				else: log.debug('L-{}: {!r}'.format(v, lines))
 
-	def fetch(self, v=None):
-		cat = '\n'.join
-		return (cat(self.v4), cat(self.v6)) if not v else cat(getattr(self, v))
+	def fetch(self, v_fetch=None):
+		tables = dict(
+			(k,dict(v)) for k,v in it.groupby(
+				sorted( self.chains.viewitems(),
+					key=lambda ((v,table,chain),contents):\
+						(v, table, chain.lower() in builtins) ),
+				key=lambda ((v,table,chain),contents): (v, table) ))
+		dump = dict()
+		for (v, table), chains in tables.viewitems():
+			if v not in dump: dump[v] = list()
+			# Table header (like "*filter")
+			dump[v].extend(['*'+table, ''])
+			# Chain specs (":INPUT ACCEPT [0:0]")
+			for v, table, chain in chains.viewkeys():
+				policy = self.policies[v,table,chain]
+				dump[v].extend([':{} {} [0:0]'.format(chain, policy.upper())])
+			dump[v].append('')
+			# Actual rules
+			for contents in chains.viewvalues(): dump[v].extend(contents)
+			# Final (per-table) "COMMIT" line
+			dump[v].extend(['', 'COMMIT', '', ''])
+		dump = dict((k, '\n'.join(v)) for k,v in dump.viewitems())
+		return op.itemgetter(*(('v4', 'v6') if not v_fetch else [v_fetch]))(dump)
 
 dump = Tables()
 
@@ -228,7 +260,6 @@ if not optz.no_ipsets and cfg.get('sets'):
 for table, chainz in cfg['tablez'].viewitems():
 	if table != 'nat': add = dump.append
 	else: add = ft.partial(dump.append, v='v4')
-	add('*'+table) # table header (like '*filter')
 
 	try: svc = chainz.pop('svc')
 	except KeyError: svc = dict()
@@ -268,21 +299,14 @@ for table, chainz in cfg['tablez'].viewitems():
 	for name, chain in chainz:
 		policy, ruleset = chain
 		if name.lower() in builtins: name = name.upper()
-		else: policy = '-'
+		else: policy = '-' # for custom chains it's always "-"
 
-		# Policy header (like ':INPUT ACCEPT [0:0]')
-		policy_gen = lambda policy: '\n:{} {} '.format(name, policy.upper()) + '[0:0]\n'
-		try:
-			v4, v6 = policy
-			dump.append(policy_gen(v4), 'v4')
-			dump.append(policy_gen(v6), 'v6')
-		except (TypeError, ValueError): add(policy_gen(policy))
+		dump.set_policy(table, name, policy)
 
-		header = None
 		for base, rulez in ruleset:
 			if rulez:
-				if base == None: # it's a comment: store till first valid rule
-					header = '# ' + rulez
+				if base == None: # comment, no extra processing
+					add('# ' + rulez, table, name)
 					continue
 
 				assert not isinstance(rulez, types.StringTypes)
@@ -338,13 +362,7 @@ for table, chainz in cfg['tablez'].viewitems():
 							except AttributeError: pass # no matches
 						rule = '\n'.join(rules)
 
-					if header: # flush header, since section isn't empty
-						add(header)
-						header = None
-
-					add(rule, v=proto_mark, chain=name, metrics=metrics)
-
-	add('\nCOMMIT\n\n') # table end marker
+					add(rule, table, name, v=proto_mark, metrics=metrics)
 
 
 # Ignore SIGHUP (in case of SSH break)
