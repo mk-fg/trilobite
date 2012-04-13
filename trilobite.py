@@ -61,7 +61,7 @@ extents = {
 extents = list( (re.compile('(?<=\s)((! )?'+k+')'), '{} \\1'.format(v))
 	for k,v in extents.viewitems() )
 pex = re.compile('(?<=-p\s)((\w+/)+\w+)'),\
-	re.compile('(?<=port\s)((\d+/)+\d+)') # protocol extension
+	re.compile('(?<=port\s)((\d+/)+\d+)') # protocol/port extension
 vmark = re.compile('(\s*-(v[46]))(?=\s|$)') # IP version mark
 
 cfgs = open(optz.conf).read()
@@ -116,29 +116,34 @@ class Tables:
 						for i in lines_list:
 							rule_counts[chain] += 1
 							for metric in metrics:
-								self.metrics.add((v, chain, rule_counts[chain], metric))
+								self.metrics.add((v, table, chain, rule_counts[chain], metric))
 					else: rule_counts[chain] += len(lines_list)
 				else: log.debug('L-{}: {!r}'.format(v, lines))
 
 	def fetch(self, v_fetch=None):
-		tables = dict(
-			(k,dict(v)) for k,v in it.groupby(
+		tables = list(
+			(k,list(v)) for k,v in it.groupby(
 				sorted( self.chains.viewitems(),
 					key=lambda ((v,table,chain),contents):\
-						(v, table, chain.lower() in builtins) ),
+						(v, table, chain.lower() in builtins, chain) ),
 				key=lambda ((v,table,chain),contents): (v, table) ))
 		dump = dict()
-		for (v, table), chains in tables.viewitems():
+		for (v, table), chains in tables:
 			if v not in dump: dump[v] = list()
-			# Table header (like "*filter")
-			dump[v].extend(['*'+table, ''])
 			# Chain specs (":INPUT ACCEPT [0:0]")
-			for v, table, chain in chains.viewkeys():
-				policy = self.policies[v,table,chain]
-				dump[v].extend([':{} {} [0:0]'.format(chain, policy.upper())])
-			dump[v].append('')
+			chain_headers = list()
+			for v, table, chain in it.imap(op.itemgetter(0), chains):
+				try: policy = self.policies[v,table,chain]
+				except KeyError: continue # no policy - no chain
+				chain_headers.append(':{} {} [0:0]'.format(chain, policy.upper()))
+			if not chain_headers: continue # no chains - no table
+			# Table header (like "*filter")
+			dump[v].extend(['### Table: {}'.format(table), '*{}'.format(table), ''])
+			dump[v].extend(chain_headers)
 			# Actual rules
-			for contents in chains.viewvalues(): dump[v].extend(contents)
+			for (v, table, chain), contents in chains:
+				dump[v].extend(['', '## Chain: {}'.format(chain)])
+				dump[v].extend(contents)
 			# Final (per-table) "COMMIT" line
 			dump[v].extend(['', 'COMMIT', '', ''])
 		dump = dict((k, '\n'.join(v)) for k,v in dump.viewitems())
@@ -257,9 +262,13 @@ if not optz.no_ipsets and cfg.get('sets'):
 
 ### iptables
 
+# Used to mark connectons, if metrics_conntrack_chain is set
+metrics_mark = 0x1 if cfg.get(
+	'metrics_conntrack', dict() ).get('enabled') else None
+
 for table, chainz in cfg['tablez'].viewitems():
-	if table != 'nat': add = dump.append
-	else: add = ft.partial(dump.append, v='v4')
+	if table == 'nat': table_proto_mark = 'v4'
+	else: table_proto_mark = None
 
 	try: svc = chainz.pop('svc')
 	except KeyError: svc = dict()
@@ -294,25 +303,27 @@ for table, chainz in cfg['tablez'].viewitems():
 				chainz[chain][1].append((None, name))
 				chainz[chain][1].append((pre, rulez))
 
+	# Sort to extend metrics-chain (if any) with explicit rules
+	#  only after appending all the implicit ones from --metrics flags
+	chainz = sorted( chainz.viewitems(),
+		key=lambda (name, chain): name ==\
+			(metrics_mark and cfg[ 'metrics_conntrack']['chain']) )
 	# Form actual tables
-	chainz = sorted(chainz.viewitems(), key=lambda x: x[0].lower() in builtins)
 	for name, chain in chainz:
 		policy, ruleset = chain
 		if name.lower() in builtins: name = name.upper()
 		else: policy = '-' # for custom chains it's always "-"
 
-		dump.set_policy(table, name, policy)
+		dump.set_policy(table, name, policy, v=table_proto_mark)
 
 		for base, rulez in ruleset:
 			if rulez:
 				if base == None: # comment, no extra processing
-					add('# ' + rulez, table, name)
+					dump.append('# ' + rulez, table, name, v=proto_mark)
 					continue
 
 				assert not isinstance(rulez, types.StringTypes)
 				for rule in rulez: # rule mangling
-					log.debug('R: {!r}'.format(rule))
-
 					# Rule base: comment / state extension
 					if cfg['stateful'] and rule and '--state'\
 							not in rule and name == 'INPUT' and '--dport' in rule:
@@ -320,11 +331,15 @@ for table, chainz in cfg['tablez'].viewitems():
 					else: pre = base
 
 					# Check rule for proto marks like "-v4" or "-v6"
-					try: v, proto_mark = vmark.findall(rule)[0]
-					except (IndexError, TypeError): proto_mark = None
-					else: rule = rule.replace(v, '') # strip the magic
+					proto_mark = table_proto_mark
+					if not proto_mark:
+						try: v, proto_mark = vmark.findall(rule)[0]
+						except (IndexError, TypeError): proto_mark = None
+						else: rule = rule.replace(v, '') # strip the magic
 
+					log.debug('R (IP: {}, table: {}): {!r}'.format(proto_mark, table, rule))
 					rule = rule.split() if rule else list()
+
 					# Check for ipset existence
 					try: k = rule.index('--match-set')
 					except ValueError: ipset = None
@@ -333,6 +348,7 @@ for table, chainz in cfg['tablez'].viewitems():
 						if ipset not in sets:
 							log.warn('Skipping rule for invalid/unknown ipset "{}"'.format(ipset))
 							continue
+
 					# Metrics are split into a separate list
 					try: k = rule.index('--metrics')
 					except ValueError: metrics = None
@@ -344,25 +360,44 @@ for table, chainz in cfg['tablez'].viewitems():
 					elif rule[-1] == '-': rule = rule[:-1] + ['-j', 'DROP']
 					elif rule[-1] == '<': rule = rule[:-1] + ['-j', 'RETURN']
 					elif rule[-1] == '+': rule = rule[:-1] + ['-j', 'ACCEPT']
-					elif rule[-1] == '|': rule = rule[:-1]
-					elif '-j' not in rule: rule += ['-j', 'ACCEPT']
+					elif rule[-1] == '|': rule = rule[:-1] # just a counter or whatever
+					elif '-j' not in rule and '-g' not in rule: rule += ['-j', 'ACCEPT']
 
-					rule = ' '.join(['-A', name] + pre + rule) # rule composition
-					for k,v in extents: # rule extension (for example, adds '-m ...', where necessary)
-						if v in rule: continue
-						rule = k.sub(v, rule)
+					if metrics_mark and metrics:
+						mark = cfg['metrics_conntrack']['shift']
+						mark = '{}/{}'.format(*it.imap( hex,
+							[metrics_mark << mark, 0xffffffff << mark] ))
+						metrics_mark += 1
+						k = rule.index('-j')
+						# Add CONNMARK rule with the same filter before the original one
+						rules = (rule[:k] + [ '-j', 'CONNMARK',
+							'--set-xmark', mark ], metrics), (rule, None)
+						# Add --mark check rule with same metrics to the specified chain
+						dump.append(
+							' '.join([ '-A', cfg[ 'metrics_conntrack']['chain'],
+								'-m', 'connmark', '--mark', mark ]),
+							table, cfg['metrics_conntrack']['chain'], v=proto_mark,
+							metrics=metrics, policy='-' )
+					else: rules = [(rule, metrics)]
 
-					# Protocol extension (clone rule for each proto)
-					if rule:
-						rules = [rule]
-						for ex in pex:
-							try:
-								rules = list( ex.sub(_ex, rule) for rule in rules
-									for _ex in ex.search(rule).groups()[0].split('/') )
-							except AttributeError: pass # no matches
-						rule = '\n'.join(rules)
+					for rule, metrics in rules:
+						rule = ' '.join(['-A', name] + pre + rule) # rule composition
 
-					add(rule, table, name, v=proto_mark, metrics=metrics)
+						for k,v in extents: # rule extension (for example, adds '-m ...', where necessary)
+							if v in rule: continue
+							rule = k.sub(v, rule)
+
+						# Protocol/port extension (clone rule for each proto/port)
+						if rule:
+							rules = [rule]
+							for ex in pex:
+								try:
+									rules = list( ex.sub(_ex, rule) for rule in rules
+										for _ex in ex.search(rule).groups()[0].split('/') )
+								except AttributeError: pass # no matches
+							rule = '\n'.join(rules)
+
+						dump.append(rule, table, name, v=proto_mark, metrics=metrics)
 
 
 # Ignore SIGHUP (in case of SSH break)

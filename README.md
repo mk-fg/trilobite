@@ -198,17 +198,46 @@ Only special syntax which is not translated to iptables at all atm is
 		...
 		pulse: -s 192.168.0.163 -p tcp --dport 4712,4713 --metrics pulse.connz/media.packets
 
-It builds a special file (location can be specified in config) with the "chain
-rule_number name" syntax, example:
+It builds a special file (location can be specified in config) with the "table
+chain rule_number name" syntax, example:
 
-	INPUT 8 media.packets
-	INPUT 12 sshd.connz
-	INPUT 13 media.packets
-	INPUT 13 pulse.connz
+	filter INPUT 8 media.packets
+	filter INPUT 12 sshd.connz
+	filter INPUT 13 media.packets
+	filter INPUT 13 pulse.connz
 
 ...which can be used later with netfilter counters (think "iptables -L INPUT
 -vn") to produce stats for specific types of traffic on a local machine.
-More complicated setups can probably use fwmarks (think "-j MARK").
+
+More complicated case is when stuff like this is enabled:
+
+	metrics_conntrack:
+		enabled: true
+		table: filter
+		chain: conn_metrics
+		shift: 0
+
+That will turn a rule like this:
+
+	pulse: -s 192.168.0.163 -p tcp --dport 4712,4713 --metrics media.packets
+
+Into a set of rules:
+
+	-A conn_metrics -m connmark --mark 0x1/0xffffffff
+	-A INPUT -s 192.168.0.163 -p tcp -m multiport --dport 4712,4713 -j CONNMARK --set-xmark 0x1/0xffffffff
+	-A INPUT -s 192.168.0.163 -p tcp -m multiport --dport 4712,4713 -j ACCEPT
+
+With metrics, defined as:
+
+	filter conn_metrics 1 media.packets
+	filter INPUT 8 media.packets
+
+Thus, allowing to count all the packets and bytes in the connection, while
+retaining a stateful configuration for the firewall (i.e. making pass/filter
+decisions on per-connection, not per-packet, basis).
+
+See the comments in example config for more details on the metrics_conntrack
+section.
 
 
 ### Requirements

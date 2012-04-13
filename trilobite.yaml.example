@@ -1,6 +1,14 @@
 policy: +
 stateful: true
 
+metrics_conntrack:
+  enabled: true
+  table: filter
+  chain: conn_metrics
+  # Bitshift for connmarks (up to 32), used for metrics
+  # With shift=4, first mark will be "0x10/0xf0"
+  shift: 0
+
 fs:
   bakz:
     v4: '/var/lib/iptables/rules.backup.{num}'
@@ -25,6 +33,7 @@ sets:
   blocked:
     type: iphash
     contents:
+      - 1.2.3.4
 
 
 tablez:
@@ -68,6 +77,7 @@ tablez:
 
     input:
       - -v4 --match-set blocked src -
+      - --state RELATED,ESTABLISHED -j conn_metrics
       - --state RELATED,ESTABLISHED
       - -v4 -p icmp
       - -v6 -p icmpv6
@@ -79,15 +89,20 @@ tablez:
       # New connz
       - -i lan -j core_in
       # Known nets' reverse traffic
+      - -o lan --state RELATED,ESTABLISHED -j conn_metrics
       - -o lan --state RELATED,ESTABLISHED -j core_out
       # Self-redirect for internal nets
       - -p tcp -d 2001:470:1f0a:11de::2
     output:
       - -v4 --match-set blocked dst -
-      - --state RELATED,ESTABLISHED
       - -v4 -p icmp
       - -v6 -p icmpv6
+      - --state RELATED,ESTABLISHED -j conn_metrics
+      - --state RELATED,ESTABLISHED
 
+    conn_metrics:
+      # WIll be filled with rules for per-connection metrics
+      - <
 
     # These chains are for internal IPz that can be
     #  forwarded to external interfaces, so they'll look as
