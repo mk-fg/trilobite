@@ -114,10 +114,10 @@ class Tables:
 					if metrics:
 						if isinstance(metrics, types.StringTypes): metrics = [metrics]
 						for i in lines_list:
-							rule_counts[chain] += 1
+							rule_counts[table, chain] += 1
 							for metric in metrics:
-								self.metrics.add((v, table, chain, rule_counts[chain], metric))
-					else: rule_counts[chain] += len(lines_list)
+								self.metrics.add((v, table, chain, rule_counts[table, chain], metric))
+					else: rule_counts[table, chain] += len(lines_list)
 				else: log.debug('L-{}: {!r}'.format(v, lines))
 
 	def fetch(self, v_fetch=None):
