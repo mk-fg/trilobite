@@ -379,7 +379,7 @@ for table, chainz in cfg['tablez'].viewitems():
 		for base, rulez in ruleset:
 			if rulez:
 				if base == None: # comment, no extra processing
-					dump.append('# ' + rulez, table, name, v=proto_mark)
+					dump.append('# ' + rulez, table, name, v=table_proto_mark)
 					continue
 
 				assert not isinstance(rulez, types.StringTypes)
