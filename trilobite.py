@@ -10,26 +10,34 @@ import os, sys, re, types
 import argparse
 parser = argparse.ArgumentParser(
 	description='Apply or check netfilter rules from/against configuration file.')
+parser.add_argument('-c', '--conf',
+	default=[
+		os.path.splitext(os.path.realpath(__file__))[0]+'.yaml',
+		'/etc/trilobite.yaml' ],
+	help='Path to configuration file (default: %(default)s).')
+
 parser.add_argument('-n', '--no-revert', action='store_true',
 	help='Do not schedule tables revert (in case of ssh lock),'
 		' not recommended, since you never know when firewall may lock itself up.')
 parser.add_argument('-x', '--no-ipsets', action='store_true',
 	help='Do not process ipsets and related rules.')
+
+parser.add_argument('-j', '--jinja2', action='store_true',
+	help='Process configuration with Jinja2 templating engine first.')
+parser.add_argument('--jinja2-dump', action='store_true',
+	help='Just dump config after jinja2 processing.')
+
 parser.add_argument('-s', '--summary', action='store_true',
 	help='Show diff between old and new tables afterwards.')
-parser.add_argument('-d', '--dump', action='store_true',
-	help='No changes, just dump resulting tables to stdout.')
 parser.add_argument('-t', '--check-diff', action='store_true',
 	help='No changes, return 0 ("identical") or 2 status (not 1, so it wont be'
 		' confused with any generic error), depending on whether there are changes'
 		' in configuration waiting to be applied (configuration differs from current'
 		' iptables settings). Does not performs any ipset manipulations/comparisons.'
 		' It is done in somewhat DANGEROUS way - tables get swapped for a short time.')
-parser.add_argument('-c', '--conf',
-	default=[
-		os.path.splitext(os.path.realpath(__file__))[0]+'.yaml',
-		'/etc/trilobite.yaml' ],
-	help='Path to configuration file (default: %(default)s).')
+
+parser.add_argument('-d', '--dump', action='store_true',
+	help='No changes, just dump resulting tables to stdout.')
 parser.add_argument('--debug', action='store_true', help='Verbose operation mode.')
 optz = parser.parse_args()
 
@@ -66,6 +74,30 @@ vmark = re.compile('(\s*-(v[46]))(?=\s|$)') # IP version mark
 
 
 cfg = open(optz.conf).read()
+
+if optz.jinja2:
+	import jinja2
+	cfg = jinja2.Template(cfg)
+
+	# Template parameters
+	hosts = dict()
+	for line in (line.strip().split() for line in open('/etc/hosts')):
+		if not line or line[0][0] == '#': continue
+		ip, names = line[0], line[1:]
+		for name in names:
+			name, dst = name.split('.'), hosts
+			if len(name) > 1:
+				for slug in reversed(name[1:]): dst = dst.setdefault(slug, dict())
+				if len(name) > 2: hosts.setdefault('.'.join(name[1:]), dict())[name[0]] = ip
+			if not isinstance(dst, dict):
+				log.debug('Name/domain conflict for {!r} (path: {})'.format(dst, '.'.join(name[1:])))
+			else: dst[name[0]] = ip
+
+	cfg = cfg.render(hosts=hosts)
+	if optz.jinja2_dump:
+		sys.stdout.write(cfg)
+		sys.exit()
+
 cfg = cfg.replace(r'\t', '  ') # I tend to use tabs, which are not YAML-friendly
 cfg = re.sub(re.compile(r'[ \t]*\\\n\s*', re.M), ' ', cfg)
 

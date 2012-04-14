@@ -242,8 +242,34 @@ Also, there's --metrics-notrack to opt-out of the conntrack rules, when
 metrics_conntrack is enabled (for udp, icmp or whatever non-generic rules).
 
 
+##### Templating
+
+WIth --jinja2 option, configuration file will be processed by jinja2, before
+parsed as yaml.
+
+See [jinja2 documentation](http://jinja.pocoo.org/docs/templates/) for template
+syntax description.
+
+Parameters, passed to template.render():
+
+* hosts - /etc/hosts as a mapping.
+
+For example, hosts-file line `1.2.3.4 host.example.org` will produce following
+mapping (presented as yaml):
+
+	sub.host.example.org: 1.2.3.4
+	host.example.org:
+		sub: 1.2.3.4
+	org:
+		example:
+			host:
+				sub: 1.2.3.4
+
+
 ### Requirements
 
 Uses [PyYAML](http://pyyaml.org/wiki/PyYAML) module along with
 [iptables](http://www.netfilter.org/) and [ipset](http://ipset.netfilter.org/)
 binaries.
+
+[Jinja2](http://jinja.pocoo.org/) is only required if --jinja2 opton is used.
