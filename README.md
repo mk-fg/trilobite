@@ -235,9 +235,11 @@ With metrics, defined as:
 Thus, allowing to count all the packets and bytes in the connection, while
 retaining a stateful configuration for the firewall (i.e. making pass/filter
 decisions on per-connection, not per-packet, basis).
-
 See the comments in example config for more details on the metrics_conntrack
 section.
+
+Also, there's --metrics-notrack to opt-out of the conntrack rules, when
+metrics_conntrack is enabled (for udp, icmp or whatever non-generic rules).
 
 
 ### Requirements

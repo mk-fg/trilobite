@@ -378,9 +378,14 @@ for table, chainz in cfg['tablez'].viewitems():
 							continue
 
 					# Metrics are split into a separate list
-					try: k = rule.index('--metrics')
-					except ValueError: metrics = None
-					else: metrics, rule = rule[k+1].split('/'), rule[:k] + rule[k+2:]
+					metrics, metrics_track = list(), False
+					for mark in '--metrics-notrack', '--metrics':
+						try: k = rule.index(mark)
+						except ValueError: pass
+						else:
+							if mark == '--metrics': metrics_track = True
+							metrics.extend(rule[k+1].split('/'))
+							rule = rule[:k] + rule[k+2:]
 
 					# Final rules (like '-A INPUT -j DROP')
 					if not rule: rule = ['-j', 'DROP']
@@ -391,7 +396,7 @@ for table, chainz in cfg['tablez'].viewitems():
 					elif rule[-1] == '|': rule = rule[:-1] # just a counter or whatever
 					elif '-j' not in rule and '-g' not in rule: rule += ['-j', 'ACCEPT']
 
-					if metrics_mark and metrics:
+					if metrics_track and metrics_mark and metrics:
 						mark = hex(metrics_mark << cfg['metrics_conntrack']['shift'])
 						metrics_mark = metrics_mark << 1 # use unique bits to avoid overriding other marks
 						if metrics_mark > 2**32-1:
