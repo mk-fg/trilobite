@@ -209,7 +209,12 @@ chain rule_number name" syntax, example:
 ...which can be used later with netfilter counters (think "iptables -L INPUT
 -vn") to produce stats for specific types of traffic on a local machine.
 
-More complicated case is when stuff like this is enabled:
+Note that since 99% of tcp packets (all, except syn) are usually matched by some
+"--state RELATED,ESTABLISHED" rule, "pulse" rule above will only count syn
+packets (new connections), not the actual traffic.
+
+It's to count connections' traffic as well, it's possible to use
+"--metrics-track" magic, with following section in the config:
 
 	metrics_conntrack:
 		enabled: true
@@ -217,11 +222,11 @@ More complicated case is when stuff like this is enabled:
 		chain: conn_metrics
 		shift: 0
 
-That will turn a rule like this:
+So a rule like this:
 
-	pulse: -s 192.168.0.163 -p tcp --dport 4712,4713 --metrics media.packets
+	pulse: -s 192.168.0.163 -p tcp --dport 4712,4713 --metrics-track media.packets
 
-Into a set of rules:
+Will be transformed into a following set of rules:
 
 	-A conn_metrics -m connmark --mark 0x1/0x1
 	-A INPUT -s 192.168.0.163 -p tcp -m multiport --dport 4712,4713 -j CONNMARK --or-mark 0x1
@@ -232,14 +237,12 @@ With metrics, defined as:
 	filter conn_metrics 1 media.packets
 	filter INPUT 8 media.packets
 
-Thus, allowing to count all the packets and bytes in the connection, while
+Thus, allowing to count all the packets and bytes in the connection (by piping
+them through "conn_metrics" chain before accepting by --state rule), while
 retaining a stateful configuration for the firewall (i.e. making pass/filter
 decisions on per-connection, not per-packet, basis).
 See the comments in example config for more details on the metrics_conntrack
 section.
-
-Also, there's --metrics-notrack to opt-out of the conntrack rules, when
-metrics_conntrack is enabled (for udp, icmp or whatever non-generic rules).
 
 
 ##### Templating

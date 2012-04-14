@@ -411,11 +411,11 @@ for table, chainz in cfg['tablez'].viewitems():
 
 					# Metrics are split into a separate list
 					metrics, metrics_track = list(), False
-					for mark in '--metrics-notrack', '--metrics':
+					for mark in '--metrics', '--metrics-track':
 						try: k = rule.index(mark)
 						except ValueError: pass
 						else:
-							if mark == '--metrics': metrics_track = True
+							if mark == '--metrics-track': metrics_track = True
 							metrics.extend(rule[k+1].split('/'))
 							rule = rule[:k] + rule[k+2:]
 
