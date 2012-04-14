@@ -5,7 +5,7 @@
 import itertools as it, operator as op, functools as ft
 from subprocess import Popen, PIPE, STDOUT
 from collections import defaultdict
-import os, sys, yaml, re, types
+import os, sys, re, types
 
 import argparse
 parser = argparse.ArgumentParser(
@@ -64,10 +64,49 @@ pex = re.compile('(?<=-p\s)((\w+/)+\w+)'),\
 	re.compile('(?<=port\s)((\d+/)+\d+)') # protocol/port extension
 vmark = re.compile('(\s*-(v[46]))(?=\s|$)') # IP version mark
 
-cfgs = open(optz.conf).read()
-cfgs = cfgs.replace('\t', '  ') # I tend to use tabs, which are not YAML-friendly
-cfgs = re.sub(re.compile(' *\\\\\n\s*', re.M), ' ', cfgs)
-cfg = yaml.load(cfgs)
+
+cfg = open(optz.conf).read()
+cfg = cfg.replace(r'\t', '  ') # I tend to use tabs, which are not YAML-friendly
+cfg = re.sub(re.compile(r'[ \t]*\\\n\s*', re.M), ' ', cfg)
+
+
+import yaml, yaml.constructor
+from collections import OrderedDict
+
+class OrderedDictYAMLLoader(yaml.Loader):
+	'Based on: https://gist.github.com/844388'
+
+	def __init__(self, *args, **kwargs):
+		yaml.Loader.__init__(self, *args, **kwargs)
+		self.add_constructor(u'tag:yaml.org,2002:map', type(self).construct_yaml_map)
+		self.add_constructor(u'tag:yaml.org,2002:omap', type(self).construct_yaml_map)
+
+	def construct_yaml_map(self, node):
+		data = OrderedDict()
+		yield data
+		value = self.construct_mapping(node)
+		data.update(value)
+
+	def construct_mapping(self, node, deep=False):
+		if isinstance(node, yaml.MappingNode):
+			self.flatten_mapping(node)
+		else:
+			raise yaml.constructor.ConstructorError( None, None,
+				'expected a mapping node, but found {}'.format(node.id), node.start_mark )
+
+		mapping = OrderedDict()
+		for key_node, value_node in node.value:
+			key = self.construct_object(key_node, deep=deep)
+			try:
+				hash(key)
+			except TypeError, exc:
+				raise yaml.constructor.ConstructorError( 'while constructing a mapping',
+					node.start_mark, 'found unacceptable key ({})'.format(exc), key_node.start_mark )
+			value = self.construct_object(value_node, deep=deep)
+			mapping[key] = value
+		return mapping
+
+cfg = yaml.load(cfg, OrderedDictYAMLLoader)
 
 
 class Tables:
@@ -283,20 +322,9 @@ for table, chainz in cfg['tablez'].viewitems():
 
 	# Extend chains w/ svc rules, if any
 	if svc:
-		cfgt = re.findall('\n(\s+)'+table+':(.+?)\n((\\1)\S+:.*|$)', cfgs, re.S)[0][1]
-		ih = {}
 		for name, rulez in svc.viewitems():
-			indent = re.findall('^(\s+)'+name+':', cfgt, re.M)
-			for i in indent:
-				i = i.lstrip('\n')
-				try:
-					if name not in ih[i]: ih[i].append(name)
-				except KeyError: ih[i] = [name]
-		indent, ih = sorted(ih.viewitems(), key=lambda x: len(x[1]), reverse=True)[0]
-		for name in re.findall('^'+indent+'(\S+):', cfgt, re.M):
-			if name not in ih: continue
-			try: pre = svc[name].viewitems() # full specification (dict w/ chain and rules list)
-			except AttributeError: pre = [('input', svc[name])] # it's just a list of rules, defaults to input chain
+			try: pre = rulez.viewitems() # full specification (dict w/ chain and rules list)
+			except AttributeError: pre = [('input', rulez)] # it's just a list of rules, defaults to input chain
 			for chain, rulez in pre:
 				chain, policy, pre = chainspec(chain) # policy here is silently ignored
 				rulez = [rulez] if isinstance(rulez, types.StringTypes) else rulez
