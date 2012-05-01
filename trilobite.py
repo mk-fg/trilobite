@@ -5,6 +5,7 @@
 import itertools as it, operator as op, functools as ft
 from subprocess import Popen, PIPE, STDOUT
 from collections import defaultdict
+import yaml, yaml.constructor
 import os, sys, re, types
 
 import argparse
@@ -47,6 +48,12 @@ try:
 	elif not os.path.exists(optz.conf): raise IndexError
 except IndexError:
 	parser.error('Unable to find configuration file at {}'.format(optz.conf))
+
+with open(optz.conf, 'rb') as src:
+	for line in src:
+		match = re.search(r'\s*#\s*-\*-\s*(?P<var>[\w\d]+):\s*(?P<val>.*)\s*-\*-\s*$', line)
+		if not match: break
+		setattr(optz, match.group('var'), yaml.load(match.group('val')))
 
 import logging
 logging.basicConfig( level=logging.INFO
@@ -102,7 +109,6 @@ cfg = cfg.replace(r'\t', '  ') # I tend to use tabs, which are not YAML-friendly
 cfg = re.sub(re.compile(r'[ \t]*\\\n\s*', re.M), ' ', cfg)
 
 
-import yaml, yaml.constructor
 from collections import OrderedDict
 
 class OrderedDictYAMLLoader(yaml.Loader):
