@@ -72,13 +72,14 @@ extents = {
 	'--dport (\S+,)+\S+': '-m multiport',
 	'--match-set': '-m set',
 	'--pkt-type': '-m pkttype',
-	'--uid-owner': '-m owner' }
+	'--(u|g)id-owner': '-m owner' }
 extents = list( (re.compile('(?<=\s)((! )?'+k+')'), '{} \\1'.format(v))
 	for k,v in extents.viewitems() )
-pex = re.compile('(?<=-p\s)((\w+/)+\w+)'),\
-	re.compile('(?<=port\s)((\d+/)+\d+)') # protocol/port extension
 vmark = re.compile('(\s*-(v[46]))(?=\s|$)') # IP version mark
-
+ # Protocol, port, uid, gid rules' duplicaton on arg1/arg2/...
+pex = re.compile('(?<=-p\s)(?P<args>(\w+/)+\w+)'),\
+	re.compile('(?<=port\s)(?P<args>(\d+/)+\d+)'),\
+	re.compile('(?<=--(u|g)id-owner\s)(?P<args>(\w+/)+\w+)')
 
 cfg = open(optz.conf).read()
 
@@ -464,7 +465,7 @@ for table, chainz in cfg['tablez'].viewitems():
 							for ex in pex:
 								try:
 									rules = list( ex.sub(_ex, rule) for rule in rules
-										for _ex in ex.search(rule).groups()[0].split('/') )
+										for _ex in ex.search(rule).group('args').split('/') )
 								except AttributeError: pass # no matches
 							rule = '\n'.join(rules)
 
