@@ -283,7 +283,7 @@ Parameters, passed to template.render():
 
 * hosts - /etc/hosts as a mapping.
 
-For example, hosts-file line `1.2.3.4 host.example.org` will produce following
+For example, hosts-file line `1.2.3.4 sub.host.example.org` will produce following
 mapping (presented as yaml):
 
 	sub.host.example.org: 1.2.3.4
@@ -293,6 +293,10 @@ mapping (presented as yaml):
 		example:
 			host:
 				sub: 1.2.3.4
+
+Templating requirement (or any other commandline option for that matter) can be
+specified as emacs-local-var-style `# -*- jinja2: true -*-` headers (parsed as
+yaml) at the first line(s) of the script.
 
 
 ### Requirements
