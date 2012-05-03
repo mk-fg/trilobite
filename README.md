@@ -94,22 +94,24 @@ comment, and won't be parsed.
 	- -p tcp/udp -d 192.168.0.13 --dport 28637
 	- -p udp -d 192.168.0.13 --dport 28638
 
-Any number of "-p proto1/proto2..." will be expanded as multiple rules, one for
-each protocol, as tcp/udp in this case.
+	# Outgoing p2p traffic
+	- -p tcp/udp --gid-owner p2p/transmission/mldonkey
 
-There are lots of other convenience expansions like this - "--sport/dport",
-"--uid-owner a/b/c", etc.
+Any number of "-p proto1/proto2..." will be expanded as multiple rules, one for
+each protocol, as with tcp/udp in this case.
+Same goes for other convenience expansions - "--sport/dport" (common in
+stateless rulesets/chains/protos), "--uid-owner a/b/c", etc.
+
 Basically it's all accomplised by a bunch of regexes, ran over rules:
 
 	extend_modules = {
-		'--mac-source': '-m mac',
-		'--state': '-m state',
-		'--src-range': '-m iprange',
-		'--dst-range': '-m iprange',
-		'--[sd]port\s+(\S+,)+\S+': '-m multiport',
-		'--match-set': '-m set',
-		'--pkt-type': '-m pkttype',
-		'--[ug]id-owner': '-m owner',
+		'--mac-source': 'mac',
+		'--state': 'state',
+		'--(src|dst)-range': 'iprange',
+		'--[sd]port\s+(\S+,)+\S+': 'multiport',
+		'--match-set': 'set',
+		'--pkt-type': 'pkttype',
+		'--[ug]id-owner': 'owner',
 		...
 
 	extend_duplicate = [

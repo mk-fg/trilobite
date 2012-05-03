@@ -65,14 +65,13 @@ os.umask(077)
 
 builtins = {'input', 'forward', 'output', 'prerouting', 'mangle', 'postrouting'}
 extend_modules = {
-	'--mac-source': '-m mac',
-	'--state': '-m state',
-	'--src-range': '-m iprange',
-	'--dst-range': '-m iprange',
-	'--[sd]port\s+(\S+,)+\S+': '-m multiport',
-	'--match-set': '-m set',
-	'--pkt-type': '-m pkttype',
-	'--[ug]id-owner': '-m owner' }
+	'--mac-source': 'mac',
+	'--state': 'state',
+	'--(src|dst)-range': 'iprange',
+	'--[sd]port\s+(\S+,)+\S+': 'multiport',
+	'--match-set': 'set',
+	'--pkt-type': 'pkttype',
+	'--[ug]id-owner': 'owner' }
 extend_duplicate = [
 	r'(?<=-p\s)(?P<args>(\w+/)+\w+)',
 	r'(?<=port\s)(?P<args>(\d+/)+\d+)',
@@ -80,9 +79,10 @@ extend_duplicate = [
 	r'(?<=--[ug]id-owner\s)(?P<args>(\w+/)+\w+)' ]
 vmark = re.compile('(\s*-(v[46]))(?=\s|$)') # IP version mark
 
-extend_modules = list(
-	(re.compile(r'(?<=\s)((! )?'+k+')'), r'{} \1'.format(v))
-	for k,v in extend_modules.viewitems() )
+extend_modules = list( # check, search, replace
+	( re.compile('(^|\s)-m\s+{}\b'.format(re.escape(mod))),
+		re.compile(r'(?<=\s)((! )?'+ex+')'), r'-m {} \1'.format(mod) )
+	for ex,mod in extend_modules.viewitems() )
 extend_duplicate = map(re.compile, extend_duplicate)
 
 
@@ -460,9 +460,9 @@ for table, chainz in cfg['tablez'].viewitems():
 					for rule, metrics in rules:
 						rule = ' '.join(['-A', name] + pre + rule) # rule composition
 
-						for k,v in extend_modules: # to add '-m ...', where needed
-							if v in rule: continue
-							rule = k.sub(v, rule)
+						for check,ex,repl in extend_modules: # to add '-m ...', where needed
+							if check.search(rule): continue
+							rule = ex.sub(repl, rule)
 
 						# Protocol/port extension (clone rule for each proto/port)
 						if rule:
