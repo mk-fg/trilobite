@@ -97,6 +97,30 @@ comment, and won't be parsed.
 Any number of "-p proto1/proto2..." will be expanded as multiple rules, one for
 each protocol, as tcp/udp in this case.
 
+There are lots of other convenience expansions like this - "--sport/dport",
+"--uid-owner a/b/c", etc.
+Basically it's all accomplised by a bunch of regexes, ran over rules:
+
+	extend_modules = {
+		'--mac-source': '-m mac',
+		'--state': '-m state',
+		'--src-range': '-m iprange',
+		'--dst-range': '-m iprange',
+		'--[sd]port\s+(\S+,)+\S+': '-m multiport',
+		'--match-set': '-m set',
+		'--pkt-type': '-m pkttype',
+		'--[ug]id-owner': '-m owner',
+		...
+
+	extend_duplicate = [
+		r'(?<=-p\s)(?P<args>(\w+/)+\w+)',
+		r'(?<=port\s)(?P<args>(\d+/)+\d+)',
+		r'(?<=--)(?P<args>[sd]port/[sd]port)',
+		r'(?<=--[ug]id-owner\s)(?P<args>(\w+/)+\w+)',
+		...
+
+See beginning of the script for the up-to-date list of these.
+
 	- -p tcp -d 2001:470:1f0a:11de::2
 	# Cut the rest
 	-

@@ -64,22 +64,27 @@ os.umask(077)
 
 
 builtins = {'input', 'forward', 'output', 'prerouting', 'mangle', 'postrouting'}
-extents = {
+extend_modules = {
 	'--mac-source': '-m mac',
 	'--state': '-m state',
 	'--src-range': '-m iprange',
 	'--dst-range': '-m iprange',
-	'--(s|d)port (\S+,)+\S+': '-m multiport',
+	'--[sd]port\s+(\S+,)+\S+': '-m multiport',
 	'--match-set': '-m set',
 	'--pkt-type': '-m pkttype',
-	'--(u|g)id-owner': '-m owner' }
-extents = list( (re.compile(r'(?<=\s)((! )?'+k+')'), r'{} \1'.format(v))
-	for k,v in extents.viewitems() )
+	'--[ug]id-owner': '-m owner' }
+extend_duplicate = [
+	r'(?<=-p\s)(?P<args>(\w+/)+\w+)',
+	r'(?<=port\s)(?P<args>(\d+/)+\d+)',
+	r'(?<=--)(?P<args>[sd]port/[sd]port)',
+	r'(?<=--[ug]id-owner\s)(?P<args>(\w+/)+\w+)' ]
 vmark = re.compile('(\s*-(v[46]))(?=\s|$)') # IP version mark
- # Protocol, port, uid, gid rules' duplicaton on arg1/arg2/...
-pex = re.compile('(?<=-p\s)(?P<args>(\w+/)+\w+)'),\
-	re.compile('(?<=port\s)(?P<args>(\d+/)+\d+)'),\
-	re.compile('(?<=--(u|g)id-owner\s)(?P<args>(\w+/)+\w+)')
+
+extend_modules = list(
+	(re.compile(r'(?<=\s)((! )?'+k+')'), r'{} \1'.format(v))
+	for k,v in extend_modules.viewitems() )
+extend_duplicate = map(re.compile, extend_duplicate)
+
 
 cfg = open(optz.conf).read()
 
@@ -455,14 +460,14 @@ for table, chainz in cfg['tablez'].viewitems():
 					for rule, metrics in rules:
 						rule = ' '.join(['-A', name] + pre + rule) # rule composition
 
-						for k,v in extents: # rule extension (for example, adds '-m ...', where necessary)
+						for k,v in extend_modules: # to add '-m ...', where needed
 							if v in rule: continue
 							rule = k.sub(v, rule)
 
 						# Protocol/port extension (clone rule for each proto/port)
 						if rule:
 							rules = [rule]
-							for ex in pex:
+							for ex in extend_duplicate:
 								try:
 									rules = list( ex.sub(_ex, rule) for rule in rules
 										for _ex in ex.search(rule).group('args').split('/') )
