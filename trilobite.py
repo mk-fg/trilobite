@@ -69,11 +69,11 @@ extents = {
 	'--state': '-m state',
 	'--src-range': '-m iprange',
 	'--dst-range': '-m iprange',
-	'--dport (\S+,)+\S+': '-m multiport',
+	'--(s|d)port (\S+,)+\S+': '-m multiport',
 	'--match-set': '-m set',
 	'--pkt-type': '-m pkttype',
 	'--(u|g)id-owner': '-m owner' }
-extents = list( (re.compile('(?<=\s)((! )?'+k+')'), '{} \\1'.format(v))
+extents = list( (re.compile(r'(?<=\s)((! )?'+k+')'), r'{} \1'.format(v))
 	for k,v in extents.viewitems() )
 vmark = re.compile('(\s*-(v[46]))(?=\s|$)') # IP version mark
  # Protocol, port, uid, gid rules' duplicaton on arg1/arg2/...
