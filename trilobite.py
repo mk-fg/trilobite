@@ -74,8 +74,8 @@ extend_modules = {
 	'--[ug]id-owner': 'owner' }
 extend_duplicate = [
 	r'(?<=-p\s)(?P<args>(\w+/)+\w+)',
-	r'(?<=port\s)(?P<args>(\d+/)+\d+)',
 	r'(?<=--)(?P<args>[sd]port/[sd]port)',
+	r'(?<=--[sd]port\s)(?P<args>(\w+/)+\w+)',
 	r'(?<=--[ug]id-owner\s)(?P<args>(\w+/)+\w+)' ]
 vmark = re.compile('(\s*-(v[46]))(?=\s|$)') # IP version mark
 

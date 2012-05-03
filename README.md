@@ -116,8 +116,8 @@ Basically it's all accomplised by a bunch of regexes, ran over rules:
 
 	extend_duplicate = [
 		r'(?<=-p\s)(?P<args>(\w+/)+\w+)',
-		r'(?<=port\s)(?P<args>(\d+/)+\d+)',
 		r'(?<=--)(?P<args>[sd]port/[sd]port)',
+		r'(?<=--[sd]port\s)(?P<args>(\w+/)+\w+)',
 		r'(?<=--[ug]id-owner\s)(?P<args>(\w+/)+\w+)',
 		...
 
