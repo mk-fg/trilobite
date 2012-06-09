@@ -271,6 +271,20 @@ See the comments in example config for more details on the metrics_conntrack
 section.
 
 
+##### Quick manual non-critical rule disabling
+
+Rules can have --try option in them, in which case these rules will be disabled
+if --skip-tries (-e) option is specified.
+
+My use-case is not-so-important rules, depending on the DNS availability - some
+single-ip hosts on the internet.
+If link is currently down, iptables will fail to apply the whole ruleset, which
+is much worse than just skipping these particular rules until the link will be
+restored.
+
+Naturally, option itself will never be passed to iptables.
+
+
 ##### Templating
 
 WIth --jinja2 option, configuration file will be processed by jinja2, before

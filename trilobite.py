@@ -37,6 +37,8 @@ parser.add_argument('-t', '--check-diff', action='store_true',
 		' iptables settings). Does not performs any ipset manipulations/comparisons.'
 		' It is done in somewhat DANGEROUS way - tables get swapped for a short time.')
 
+parser.add_argument('-e', '--skip-tries',
+	action='store_true', help='Do not apply rules, marked with --try.')
 parser.add_argument('-d', '--dump', action='store_true',
 	help='No changes, just dump resulting tables to stdout.')
 parser.add_argument('--debug', action='store_true', help='Verbose operation mode.')
@@ -420,6 +422,13 @@ for table, chainz in cfg['tablez'].viewitems():
 						if ipset not in sets:
 							log.warn('Skipping rule for invalid/unknown ipset "{}"'.format(ipset))
 							continue
+
+					# --try marks
+					try: k = rule.index('--try')
+					except ValueError: pass
+					else:
+						if optz.skip_tries: continue
+						rule = rule[:k] + rule[k+1:]
 
 					# Metrics are split into a separate list
 					metrics, metrics_track = list(), False
