@@ -513,6 +513,8 @@ def push_table(v, table):
 	if iptables.wait(): raise TableUpdateError('Failed to update table')
 
 
+clean_exit = True
+
 for v in 'v4', 'v6':
 	if not optz.dump:
 		# Pull the old table, to check if it's similar to new one (no backup needed in that case)
@@ -520,7 +522,9 @@ for v in 'v4', 'v6':
 
 		# Push new table
 		try: push_table(v, dump.fetch(v))
-		except TableUpdateError as err: log.error(bytes(err))
+		except TableUpdateError as err:
+			log.error(bytes(err))
+			clean_exit = False
 
 		# Pull new table in iptables-save format, to compare against old one
 		new_table, new_essence = pull_table(v)
@@ -542,13 +546,13 @@ for v in 'v4', 'v6':
 				log.info('{} table:'.format(v))
 				diff_summary(old_essence, new_essence)
 
-			# First diff means we're done if that's what is requested
-			if optz.check_diff: sys.exit(2)
-
-			# Schedule table revert if no commit action will be issued (to ensure that tables are in the sane state)
-			if not optz.no_revert:
-				at = Popen([cfg['fs']['bin']['at'], 'now', '+', str(cfg['fs']['bakz']['delay']), 'minutes'], stdin=PIPE)
-				at.stdin.write('{} < {}\n'.format(cfg['fs']['bin'][v+'_push'], i)) # restore from latest backup
+			# Set diff-check result, if that's what's requested
+			if optz.check_diff: clean_exit = False
+			elif not optz.no_revert:
+				# Schedule table revert (in case user is locked-out of the system)
+				at = Popen([ cfg['fs']['bin']['at'], 'now', '+',
+					str(cfg['fs']['bakz']['delay']), 'minutes' ], stdin=PIPE)
+				at.stdin.write('{} < {}\n'.format(cfg['fs']['bin'][v+'_push'], i)) # restore latest backup
 				at.stdin.close()
 				at.wait()
 
@@ -557,7 +561,7 @@ for v in 'v4', 'v6':
 		sys.stdout.write(dump.fetch(v)+'\n\n')
 
 
-if dump.metrics:
+if dump.metrics and not optz.check_diff:
 	metric_repr = lambda metric: ' '.join(it.imap(bytes, metric))
 
 	if optz.dump:
@@ -574,3 +578,6 @@ if dump.metrics:
 			except KeyError: continue
 			metrics_dump = '\n'.join(it.imap(metric_repr, sorted(metrics))) + '\n'
 			open(dst, 'wb').write(metrics_dump)
+
+
+sys.exit(0 if clean_exit else 2)
