@@ -70,6 +70,7 @@ extend_modules = {
 	'--mac-source': 'mac',
 	'--state': 'state',
 	'--(src|dst)-range': 'iprange',
+	'--[sd]?ports': 'multiport',
 	'--[sd]port\s+(\S+,)+\S+': 'multiport',
 	'--match-set': 'set',
 	'--pkt-type': 'pkttype',
