@@ -68,7 +68,7 @@ os.umask(077)
 builtins = {'input', 'forward', 'output', 'prerouting', 'mangle', 'postrouting'}
 extend_modules = {
 	'--mac-source': 'mac',
-	'--state': 'state',
+	'--ctstate': 'conntrack',
 	'--(src|dst)-range': 'iprange',
 	'--[sd]?ports': 'multiport',
 	'--[sd]port\s+(\S+,)+\S+': 'multiport',
@@ -400,9 +400,9 @@ for table, chainz in cfg['tablez'].viewitems():
 				assert not isinstance(rulez, types.StringTypes)
 				for rule in rulez: # rule mangling
 					# Rule base: comment / state extension
-					if cfg['stateful'] and rule and '--state'\
+					if cfg['stateful'] and rule and '--ctstate'\
 							not in rule and name == 'INPUT' and '--dport' in rule:
-						pre = base + ['--state', 'NEW']
+						pre = base + ['--ctstate', 'NEW']
 					else: pre = base
 
 					# Check rule for proto marks like "-v4" or "-v6"
