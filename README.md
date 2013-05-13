@@ -293,24 +293,29 @@ parsed as yaml.
 See [jinja2 documentation](http://jinja.pocoo.org/docs/templates/) for template
 syntax description.
 
-Parameters, passed to template.render():
+Parameters passed to template.render():
 
 * hosts - /etc/hosts as a mapping.
 
-For example, hosts-file line `1.2.3.4 sub.host.example.org` will produce following
-mapping (presented as yaml):
+	For example, hosts-file line `1.2.3.4 sub.host.example.org` will produce following
+	mapping (presented as yaml):
 
-	sub.host.example.org: 1.2.3.4
-	host.example.org:
-		sub: 1.2.3.4
-	org:
-		example:
-			host:
-				sub: 1.2.3.4
+		sub.host.example.org: 1.2.3.4
+		host.example.org:
+			sub: 1.2.3.4
+		org:
+			example:
+				host:
+					sub: 1.2.3.4
+
+* cfg - whatever is in --jinja2-config yaml, if passed, else None.
 
 Templating requirement (or any other commandline option for that matter) can be
 specified as emacs-local-var-style `# -*- jinja2: true -*-` headers (parsed as
 yaml) at the first line(s) of the script.
+
+Templating result as well as passed template context values can be dumped with
+--jinja-dump flag.
 
 
 ### Requirements

@@ -25,6 +25,8 @@ parser.add_argument('-x', '--no-ipsets', action='store_true',
 
 parser.add_argument('-j', '--jinja2', action='store_true',
 	help='Process configuration with Jinja2 templating engine first.')
+parser.add_argument('--jinja2-config', metavar='path',
+	help='YAML config to pass to jinja2 templates as "cfg" var.')
 parser.add_argument('--jinja2-dump', action='store_true',
 	help='Just dump config after jinja2 processing.')
 
@@ -53,9 +55,9 @@ except IndexError:
 
 with open(optz.conf, 'rb') as src:
 	for line in src:
-		match = re.search(r'\s*#\s*-\*-\s*(?P<var>[\w\d]+):\s*(?P<val>.*)\s*-\*-\s*$', line)
+		match = re.search(r'\s*#\s*-\*-\s*(?P<var>[\w\d_-]+):\s*(?P<val>.*)\s*-\*-\s*$', line)
 		if not match: break
-		setattr(optz, match.group('var'), yaml.load(match.group('val')))
+		setattr(optz, match.group('var').lstrip('-').replace('-', '_'), yaml.load(match.group('val')))
 
 import logging
 logging.basicConfig( level=logging.INFO
@@ -109,8 +111,14 @@ if optz.jinja2:
 				log.debug('Name/domain conflict for {!r} (path: {})'.format(dst, '.'.join(name[1:])))
 			else: dst[name[0]] = ip
 
-	cfg = cfg.render(hosts=hosts)
+	tpl_context = dict( hosts=hosts,
+		cfg=yaml.load(open(optz.jinja2_config)) if optz.jinja2_config else None )
+	cfg = cfg.render(**tpl_context)
 	if optz.jinja2_dump:
+		sys.stdout.write('### --- Template context:\n')
+		for line in yaml.dump(tpl_context, default_flow_style=False).splitlines():
+			sys.stdout.write('# {}\n'.format(line))
+		sys.stdout.write('### --- Template context ends\n\n')
 		sys.stdout.write(cfg)
 		sys.exit()
 
