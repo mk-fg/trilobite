@@ -20,8 +20,6 @@ parser.add_argument('-c', '--conf',
 parser.add_argument('-n', '--no-revert', action='store_true',
 	help='Do not schedule tables revert (in case of ssh lock),'
 		' not recommended, since you never know when firewall may lock itself up.')
-parser.add_argument('-x', '--no-ipsets', action='store_true',
-	help='Do not process ipsets and related rules.')
 
 parser.add_argument('-j', '--jinja2', action='store_true',
 	help='Process configuration with Jinja2 templating engine first.')
