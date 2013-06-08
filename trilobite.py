@@ -73,6 +73,7 @@ extend_modules = {
 	'--[sd]?ports': 'multiport',
 	'--[sd]port\s+(\S+,)+\S+': 'multiport',
 	'--match-set': 'set',
+	'--nfacct-name': 'nfacct',
 	'--pkt-type': 'pkttype',
 	'--[ug]id-owner': 'owner' }
 extend_duplicate = [
@@ -283,7 +284,7 @@ def diff_summary(old, new):
 ### ipsets
 
 sets = defaultdict(list)
-if not optz.no_ipsets and cfg.get('sets'):
+if cfg.get('sets'):
 	null = open('/dev/null', 'wb')
 
 	# Generate new ipset specs
@@ -349,6 +350,19 @@ if not optz.no_ipsets and cfg.get('sets'):
 				at.stdin.write('{} --restore < {}\n'.format(cfg['fs']['bin']['ipset'], i)) # restore from latest backup
 				at.stdin.close()
 				at.wait()
+
+
+### nfacct
+
+if cfg.get('acct'):
+	for name in cfg['acct']:
+		print('NFACCT: {}'.format(name))
+		nfacct = Popen([cfg['fs']['bin']['nfacct'], 'add', name], stdout=PIPE, stderr=STDOUT)
+		err = nfacct.stdout.read()
+		if nfacct.wait() and not re.search(
+				r'^nfacct v[\d.]+: error: Device or resource busy$', err.strip() ):
+			log.fatal('nfacct object creation failure: {}'.format(err))
+			sys.exit(1)
 
 
 
