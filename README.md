@@ -295,7 +295,7 @@ syntax description.
 
 Parameters passed to template.render():
 
-* hosts - /etc/hosts as a mapping.
+* `hosts` - /etc/hosts as a mapping.
 
 	For example, hosts-file line `1.2.3.4 sub.host.example.org` will produce following
 	mapping (presented as yaml):
@@ -308,7 +308,18 @@ Parameters passed to template.render():
 				host:
 					sub: 1.2.3.4
 
-* cfg - whatever is in --jinja2-config yaml, if passed, else None.
+* `cfg` - whatever is in --jinja2-config yaml, if passed, else None.
+
+Extra filters/tags available:
+
+* `dns` filter - will use `socket.getaddrinfo()` to resolve hostname into *unique* address.
+
+	One optional argument is address family: "inet" or "inet6".
+
+	If name resolves to non-unique address or doesn't resolve - exception will be
+	raised (use --debug for more details, socket.gaierror's are remarkably
+	non-informative), --try feature can be used to just skip rules that aren't
+	critical in such cases.
 
 Templating requirement (or any other commandline option for that matter) can be
 specified as emacs-local-var-style `# -*- jinja2: true -*-` headers (parsed as

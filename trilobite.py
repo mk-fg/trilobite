@@ -6,7 +6,7 @@ import itertools as it, operator as op, functools as ft
 from subprocess import Popen, PIPE, STDOUT
 from collections import defaultdict
 import yaml, yaml.constructor
-import os, sys, re, types
+import os, sys, re, types, socket
 
 import argparse
 parser = argparse.ArgumentParser(
@@ -90,11 +90,65 @@ extend_modules = list( # check, search, replace
 extend_duplicate = map(re.compile, extend_duplicate)
 
 
+class AddressError(Exception): pass
+
+def get_socket_info( host, port=0, family=0,
+		socktype=0, protocol=0, force_unique_address=False ):
+	log_params = [port, family, socktype, protocol]
+	log.debug('Resolving: {} (params: {})'.format(host, log_params))
+	try: addrinfo = socket.getaddrinfo(host, port, family, socktype, protocol)
+	except socket.gaierror as err:
+		log.debug('Failed to resolve host: {} (params: {}) - {}'.format(host, log_params, err))
+		raise
+
+	if not addrinfo:
+		log.fatal('Failed to match host to a socket address: {}'.format(host))
+		raise AddressError
+
+	ai_af, ai_addr = set(), list()
+	for family, _, _, hostname, addr in addrinfo:
+		ai_af.add(family)
+		ai_addr.append((addr[0], family))
+
+	if len(ai_af) > 1:
+		af_names = dict((v, k) for k,v in vars(socket).viewitems() if k.startswith('AF_'))
+		ai_af_names = list(af_names.get(af, str(af)) for af in ai_af)
+		if socket.AF_INET not in ai_af:
+			log.fatal(
+				( 'Ambiguous socket host specification (matches address famlies: {}),'
+					' refusing to pick one at random - specify socket family instead. Addresses: {}' )
+				.format(', '.join(ai_af_names), ', '.join(ai_addr)) )
+			raise AddressError
+		log.warn( 'Specified host matches more than'
+			' one address family ({}), using it as IPv4 (AF_INET).'.format(ai_af_names) )
+		af = socket.AF_INET
+	else: af = list(ai_af)[0]
+
+	for addr, family in ai_addr:
+		if family == af: break
+	else: raise AddressError
+	ai_addr_unique = set(ai_addr)
+	if len(ai_addr_unique) > 1:
+		if force_unique_address:
+			raise AddressError('Address matches more than one host: {}'.format(ai_addr_unique))
+		log.warn( 'Specified host matches more than'
+			' one address ({}), using first one: {}'.format(ai_addr_unique, addr) )
+
+	return addr, port
+
+
 cfg = open(optz.conf).read()
 
 if optz.jinja2:
 	import jinja2
-	cfg = jinja2.Template(cfg)
+	def dns(host, family=0):
+		if family != 0: family = getattr(socket, 'AF_{}'.format(family.upper()))
+		addr, port = get_socket_info(host, family=family, force_unique_address=True)
+		return addr
+	env = jinja2.Environment(loader=jinja2.FileSystemLoader('/var/empty'))
+	env.filters['dns'] = dns
+
+	cfg = env.from_string(cfg)
 
 	# Template parameters
 	hosts = dict()
@@ -356,7 +410,6 @@ if cfg.get('sets'):
 
 if cfg.get('acct'):
 	for name in cfg['acct']:
-		print('NFACCT: {}'.format(name))
 		nfacct = Popen([cfg['fs']['bin']['nfacct'], 'add', name], stdout=PIPE, stderr=STDOUT)
 		err = nfacct.stdout.read()
 		if nfacct.wait() and not re.search(
