@@ -39,6 +39,8 @@ parser.add_argument('-t', '--check-diff', action='store_true',
 
 parser.add_argument('-e', '--skip-tries',
 	action='store_true', help='Do not apply rules, marked with --try.')
+parser.add_argument('-r', '--replace-dns', metavar='string',
+	help='Do not bail out on dns errors, putting specified string instead of address there.')
 parser.add_argument('-d', '--dump', action='store_true',
 	help='No changes, just dump resulting tables to stdout.')
 parser.add_argument('--debug', action='store_true', help='Verbose operation mode.')
@@ -96,13 +98,11 @@ def get_socket_info( host, port=0, family=0,
 		socktype=0, protocol=0, force_unique_address=False ):
 	log_params = [port, family, socktype, protocol]
 	log.debug('Resolving: {} (params: {})'.format(host, log_params))
-	try: addrinfo = socket.getaddrinfo(host, port, family, socktype, protocol)
-	except socket.gaierror as err:
+	try:
+		addrinfo = socket.getaddrinfo(host, port, family, socktype, protocol)
+		if not addrinfo: raise socket.gaierror('No addrinfo for host: {}'.format(host))
+	except (socket.gaierror, socket.error) as err:
 		log.debug('Failed to resolve host: {} (params: {}) - {}'.format(host, log_params, err))
-		raise
-
-	if not addrinfo:
-		log.fatal('Failed to match host to a socket address: {}'.format(host))
 		raise AddressError
 
 	ai_af, ai_addr = set(), list()
@@ -143,7 +143,10 @@ if optz.jinja2:
 	import jinja2
 	def dns(host, family=0):
 		if family != 0: family = getattr(socket, 'AF_{}'.format(family.upper()))
-		addr, port = get_socket_info(host, family=family, force_unique_address=True)
+		try: addr, port = get_socket_info(host, family=family, force_unique_address=True)
+		except AddressError:
+			if not optz.replace_dns: raise
+			return optz.replace_dns
 		return addr
 	env = jinja2.Environment(loader=jinja2.FileSystemLoader('/var/empty'))
 	env.filters['dns'] = dns

@@ -319,7 +319,7 @@ Extra filters/tags available:
 	If name resolves to non-unique address or doesn't resolve - exception will be
 	raised (use --debug for more details, socket.gaierror's are remarkably
 	non-informative), --try feature can be used to just skip rules that aren't
-	critical in such cases.
+	critical in such cases, also see --replace-dns fallback option.
 
 Templating requirement (or any other commandline option for that matter) can be
 specified as emacs-local-var-style `# -*- jinja2: true -*-` headers (parsed as
