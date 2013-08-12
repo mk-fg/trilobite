@@ -145,7 +145,7 @@ if optz.jinja2:
 		if family != 0: family = getattr(socket, 'AF_{}'.format(family.upper()))
 		try: addr, port = get_socket_info(host, family=family, force_unique_address=True)
 		except AddressError:
-			if not optz.replace_dns: raise
+			if optz.replace_dns is None: raise
 			return optz.replace_dns
 		return addr
 	env = jinja2.Environment(loader=jinja2.FileSystemLoader('/var/empty'))
