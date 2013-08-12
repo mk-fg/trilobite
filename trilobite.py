@@ -102,8 +102,8 @@ def get_socket_info( host, port=0, family=0,
 		addrinfo = socket.getaddrinfo(host, port, family, socktype, protocol)
 		if not addrinfo: raise socket.gaierror('No addrinfo for host: {}'.format(host))
 	except (socket.gaierror, socket.error) as err:
-		log.debug('Failed to resolve host: {} (params: {}) - {}'.format(host, log_params, err))
-		raise AddressError
+		raise AddressError( 'Failed to resolve host:'
+			' {} (params: {}) - {}'.format(host, log_params, err) )
 
 	ai_af, ai_addr = set(), list()
 	for family, _, _, hostname, addr in addrinfo:
