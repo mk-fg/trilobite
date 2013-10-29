@@ -429,8 +429,7 @@ metrics_mark = 0x1 if cfg.get(
 	'metrics_conntrack', dict() ).get('enabled') else None
 
 for table, chainz in cfg['tablez'].viewitems():
-	if table == 'nat': table_proto_mark = 'v4'
-	else: table_proto_mark = None
+	table_proto_mark = None
 
 	try: svc = chainz.pop('svc')
 	except KeyError: svc = dict()

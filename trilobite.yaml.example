@@ -49,7 +49,7 @@ tablez:
     output:
     postrouting:
 
-  nat: # IPv4-only NAT table
+  nat:
     prerouting:
     postrouting:
     output:
