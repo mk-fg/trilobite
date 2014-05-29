@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+# XXX: scrap the whole thing in favor of nftables bpf-based filters (maybe with some templaing)
 
 import itertools as it, operator as op, functools as ft
 from subprocess import Popen, PIPE, STDOUT

@@ -9,6 +9,9 @@ possible, atomic updates, plain diffs of current state vs config, ruleset
 backups and various fallbacks to make sure I don't accidentally lock myself out
 of the machine.
 
+Code is a bag of hacks in huge loops piled on over time, to be eventually
+scrapped in favor of nftables bpf-based filters.
+
 
 ### Operation
 
@@ -29,8 +32,6 @@ Then old-vs-new diff can be generated with --summary option, backups will be
 made/rotated and, unless --no-revert option is specified, "at" will be used to
 schedule rules' revert in a few minutes, which should be disabled manually, if
 ssh (or whatever access) wasn't accidentally blocked by the new rules.
-
-Code that does all this is a bag of hacks in huge loops piled on over time.
 
 
 
