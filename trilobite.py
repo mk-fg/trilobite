@@ -218,6 +218,7 @@ class OrderedDictYAMLLoader(yaml.Loader):
 		return mapping
 
 cfg = yaml.load(cfg, OrderedDictYAMLLoader)
+devnull = open(os.devnull, 'wb')
 
 
 class Tables:
@@ -342,20 +343,39 @@ def diff_summary(old, new):
 
 sets = defaultdict(list)
 if cfg.get('sets'):
-	null = open('/dev/null', 'wb')
+	# Create a separate v4/v6 family sets for each spec
+	set_specs = dict()
+	for name,props in cfg['sets'].viewitems():
+		name = name.replace('/', '-')
+		if name.endswith('-v4') or name.endswith('-v6'): names = [name]
+		else: names = list('{}-v{}'.format(name, v) for v in [4, 6])
+		for name in names: set_specs[name] = props
 
 	# Generate new ipset specs
-	for name,props in cfg['sets'].viewitems():
+	for name,props in set_specs.viewitems():
 		if optz.check_diff:
 			sets[name] = list() # has to exist, nothing more
 			continue
-		sets[name].append(['-N', name] + props['type'].split())
-		for line in (props.get('contents') or list()): sets[name].append(['-A', name] + line.split())
+		v = int(re.search(r'-v([46])$', name).group(1))
+		props_type = props['type'].split()
+		if 'family' not in props_type:
+			props_type.extend(['family', {4:'inet', 6:'inet6'}[v]])
+		sets[name].append(['create', name] + props_type)
+		for line in (props.get('contents') or list()):
+			line = line.split()
+			# Filter v4/v6-specific contents
+			match = re.search(r'^-v([46])$', line[0])
+			if match:
+				if not name.endswith(line[0]): continue
+				line = line[1:]
+			if Tables.v4_mark.search(line[0]) and v != 4: continue
+			if Tables.v6_mark.search(line[0]) and v != 6: continue
+			sets[name].append(['add', name] + line)
 
 	if not optz.check_diff:
 
 		def pull_sets():
-			ipset = Popen([cfg['fs']['bin']['ipset'], '--save'], stdout=PIPE)
+			ipset = Popen([cfg['fs']['bin']['ipset'], 'save'], stdout=PIPE)
 			old_sets, stripped = '', list()
 			for line in ipset.stdout:
 				old_sets += line
@@ -371,12 +391,12 @@ if cfg.get('sets'):
 
 		# Clear namespace for used sets
 		for name in list(sets):
-			if not Popen([cfg['fs']['bin']['ipset'], '--list', name], stdout=null, stderr=STDOUT).wait():
-				if Popen([cfg['fs']['bin']['ipset'], '--destroy', name], stdout=null, stderr=STDOUT).wait():
-					log.warn('Failed to destroy ipset "{}", will be skipped on --restore'.format(name))
+			if not Popen([cfg['fs']['bin']['ipset'], 'list', name], stdout=devnull, stderr=STDOUT).wait():
+				if Popen([cfg['fs']['bin']['ipset'], 'destroy', name], stdout=devnull, stderr=STDOUT).wait():
+					log.debug('Failed to destroy ipset "{}", will be skipped on "restore"'.format(name))
 					sets[name] = list() # should not be restored
 		# Push new sets
-		ipset = Popen([cfg['fs']['bin']['ipset'], '--restore'], stdin=PIPE)
+		ipset = Popen([cfg['fs']['bin']['ipset'], 'restore'], stdin=PIPE)
 		ipset.stdin.write('\n'.join(it.imap(' '.join, it.chain.from_iterable(sets.viewvalues()))))
 		ipset.stdin.write('\nCOMMIT\n')
 		ipset.stdin.close()
@@ -403,8 +423,8 @@ if cfg.get('sets'):
 			if not optz.no_revert:
 				at = Popen([cfg['fs']['bin']['at'], 'now', '+', str(cfg['fs']['bakz']['delay']), 'minutes'], stdin=PIPE)
 				for name in sets:
-					at.stdin.write('{} --destroy {}\n'.format(cfg['fs']['bin']['ipset'], name)) # destroy modified sets
-				at.stdin.write('{} --restore < {}\n'.format(cfg['fs']['bin']['ipset'], i)) # restore from latest backup
+					at.stdin.write('{} destroy {}\n'.format(cfg['fs']['bin']['ipset'], name)) # destroy modified sets
+				at.stdin.write('{} restore < {}\n'.format(cfg['fs']['bin']['ipset'], i)) # restore from latest backup
 				at.stdin.close()
 				at.wait()
 
@@ -427,6 +447,34 @@ if cfg.get('acct'):
 # Used to mark connectons, if metrics_conntrack_chain is set
 metrics_mark = 0x1 if cfg.get(
 	'metrics_conntrack', dict() ).get('enabled') else None
+
+def get_proto_mark(rule):
+	proto_mark = table_proto_mark
+	if not proto_mark:
+		try: v, proto_mark = vmark.findall(rule)[0]
+		except (IndexError, TypeError): proto_mark = None
+		else: rule = rule.replace(v, '') # strip the magic
+	return rule, proto_mark
+
+def clone_for_ipsets(rule, proto_mark):
+	assert isinstance(rule, list), rule
+	# Check for ipset existance, duplicate for diff ipset families
+	rule_clones = list()
+	try: k = rule.index('--match-set')
+	except ValueError: rule_clones.append(rule)
+	else:
+		ipset, ipset_protos = rule[k+1],\
+			[proto_mark] if proto_mark else ['v4', 'v6']
+		match = re.search(r'-(v[46])$', ipset)
+		ipset_protos = [(ipset, match.group(1))] if match\
+			else  list(('{}-{}'.format(ipset, k), k) for k in ipset_protos)
+		for ipset, v in ipset_protos:
+			if ipset not in sets:
+				log.warn('Skipping rule for invalid/unknown ipset "{}"'.format(ipset))
+				continue
+			rule[k+1] = ipset
+			rule_clones.append((['-{}'.format(v)] + rule) if not proto_mark else rule)
+	return rule_clones
 
 for table, chainz in cfg['tablez'].viewitems():
 	table_proto_mark = None
@@ -473,31 +521,27 @@ for table, chainz in cfg['tablez'].viewitems():
 					continue
 
 				assert not isinstance(rulez, types.StringTypes)
-				for rule in rulez: # rule mangling
+
+				## Rule mangling phase 1 - duplicate rule for v4/v6, where necessary
+				for func in [clone_for_ipsets]:
+					rulez_ext = list()
+					for n, rule in enumerate(rulez):
+						rule = rule.split() if rule else list()
+						rule, proto_mark = get_proto_mark(rule)
+						rulez_ext.extend(' '.join(rule) for rule in func(rule, proto_mark))
+					rulez = rulez_ext
+
+				## Rule mangling phase 2 - change rule, producing final string for either v4 or v6
+				for rule in rulez:
 					# Rule base: comment / state extension
 					if cfg['stateful'] and rule and '--ctstate'\
 							not in rule and name == 'INPUT' and '--dport' in rule:
 						pre = base + ['--ctstate', 'NEW']
 					else: pre = base
 
-					# Check rule for proto marks like "-v4" or "-v6"
-					proto_mark = table_proto_mark
-					if not proto_mark:
-						try: v, proto_mark = vmark.findall(rule)[0]
-						except (IndexError, TypeError): proto_mark = None
-						else: rule = rule.replace(v, '') # strip the magic
-
 					log.debug('R (IP: {}, table: {}): {!r}'.format(proto_mark, table, rule))
 					rule = rule.split() if rule else list()
-
-					# Check for ipset existence
-					try: k = rule.index('--match-set')
-					except ValueError: ipset = None
-					else:
-						ipset = rule[k+1]
-						if ipset not in sets:
-							log.warn('Skipping rule for invalid/unknown ipset "{}"'.format(ipset))
-							continue
+					rule, proto_mark = get_proto_mark(rule)
 
 					# --try marks
 					try: k = rule.index('--try')
@@ -583,7 +627,8 @@ def pull_table(v):
 class TableUpdateError(Exception): pass
 
 def push_table(v, table):
-	iptables = Popen(cfg['fs']['bin'][v+'_push'], stdin=PIPE)
+	# iptables >=1.4.21 seem to spam stuff to stdout on restore, no idea why
+	iptables = Popen(cfg['fs']['bin'][v+'_push'], stdout=devnull, stdin=PIPE)
 	iptables.stdin.write(table)
 	iptables.stdin.close()
 	if iptables.wait(): raise TableUpdateError('Failed to update table')

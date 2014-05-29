@@ -31,9 +31,19 @@ fs:
 
 sets:
   blocked:
-    type: iphash
+    # Will actually create two sets - "blocked-v4" and "blocked-v6"
+    # Can be referenced in rules by both "blocked" or e.g. "blocked-v6"
+    type: hash:ip
     contents:
-      - 1.2.3.4
+      - 1.2.3.4 # will only go to *-v4 set
+      - 2001:470:1f0a:11de::2
+      # No need to prefix pure IP addresses, but might be desirable
+      #  for hostnames - by default they'll be resolved for both v4/v6 sets
+      - -v4 some.hostname.org
+      - -v6 other.hostname.org
+  someset-v6: # ipv6-only set - should be referenced in rules by this name
+    type: hash:ip
+    contents:
 
 
 tablez:
