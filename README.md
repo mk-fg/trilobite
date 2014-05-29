@@ -30,6 +30,8 @@ made/rotated and, unless --no-revert option is specified, "at" will be used to
 schedule rules' revert in a few minutes, which should be disabled manually, if
 ssh (or whatever access) wasn't accidentally blocked by the new rules.
 
+Code that does all this is a bag of hacks in huge loops piled on over time.
+
 
 
 ### Configuration
