@@ -84,7 +84,7 @@ extend_duplicate = [
 	r'(?<=--)(?P<args>[sd]port/[sd]port)',
 	r'(?<=--[sd]port\s)(?P<args>(\w+/)+\w+)',
 	r'(?<=--[ug]id-owner\s)(?P<args>(\w+/)+\w+)' ]
-vmark = re.compile('(\s*-(v[46]))(?=\s|$)') # IP version mark
+vmark = re.compile('((?:\s+|^)-(v[46]))(?=\s|$)') # IP version mark
 
 extend_modules = list( # check, search, replace
 	( re.compile('(^|\s)-m\s+{}\b'.format(re.escape(mod))),
@@ -398,7 +398,8 @@ if cfg.get('sets'):
 					sets[name] = list() # should not be restored
 		# Push new sets
 		ipset = Popen([cfg['fs']['bin']['ipset'], 'restore'], stdin=PIPE)
-		ipset.stdin.write('\n'.join(it.imap(' '.join, it.chain.from_iterable(sets.viewvalues()))))
+		ipset.stdin.write('\n'.join(it.imap(
+			' '.join, it.chain.from_iterable(sorted(sets.viewvalues())) )))
 		ipset.stdin.write('\nCOMMIT\n')
 		ipset.stdin.close()
 		ipset.wait()
@@ -454,15 +455,17 @@ def get_proto_mark(rule):
 	if not proto_mark:
 		try: v, proto_mark = vmark.findall(rule)[0]
 		except (IndexError, TypeError): proto_mark = None
-		else: rule = rule.replace(v, '') # strip the magic
+		else: rule = rule.replace(v, '', 1) # strip the magic
 	return rule, proto_mark
 
 def clone_for_ipsets(rule, proto_mark):
 	assert isinstance(rule, list), rule
 	# Check for ipset existance, duplicate for diff ipset families
 	rule_clones = list()
+	rule_clones_append = lambda v:\
+		rule_clones.append((['-{}'.format(v)] + rule) if v else rule)
 	try: k = rule.index('--match-set')
-	except ValueError: rule_clones.append(rule)
+	except ValueError: rule_clones_append(proto_mark)
 	else:
 		ipset, ipset_protos = rule[k+1],\
 			[proto_mark] if proto_mark else ['v4', 'v6']
@@ -474,7 +477,7 @@ def clone_for_ipsets(rule, proto_mark):
 				log.warn('Skipping rule for invalid/unknown ipset "{}"'.format(ipset))
 				continue
 			rule[k+1] = ipset
-			rule_clones.append((['-{}'.format(v)] + rule) if not proto_mark else rule)
+			rule_clones_append(v or proto_mark)
 	return rule_clones
 
 for table, chainz in cfg['tablez'].viewitems():
@@ -527,13 +530,15 @@ for table, chainz in cfg['tablez'].viewitems():
 				for func in [clone_for_ipsets]:
 					rulez_ext = list()
 					for n, rule in enumerate(rulez):
-						rule = rule.split() if rule else list()
 						rule, proto_mark = get_proto_mark(rule)
+						rule = rule.split() if rule else list()
 						rulez_ext.extend(' '.join(rule) for rule in func(rule, proto_mark))
 					rulez = rulez_ext
 
 				## Rule mangling phase 2 - change rule, producing final string for either v4 or v6
 				for rule in rulez:
+					rule, proto_mark = get_proto_mark(rule)
+
 					# Rule base: comment / state extension
 					if cfg['stateful'] and rule and '--ctstate'\
 							not in rule and name == 'INPUT' and '--dport' in rule:
@@ -542,7 +547,9 @@ for table, chainz in cfg['tablez'].viewitems():
 
 					log.debug('R (IP: {}, table: {}): {!r}'.format(proto_mark, table, rule))
 					rule = rule.split() if rule else list()
-					rule, proto_mark = get_proto_mark(rule)
+					assert '-v4' not in rule and '-v6' not in rule, rule
+					assert '--match-set' not in rule\
+						or re.search(r'-v[46]$', rule[rule.index('--match-set')+1]), rule
 
 					# --try marks
 					try: k = rule.index('--try')
