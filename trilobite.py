@@ -58,7 +58,7 @@ with open(optz.conf, 'rb') as src:
 	for line in src:
 		match = re.search(r'\s*#\s*-\*-\s*(?P<var>[\w\d_-]+):\s*(?P<val>.*)\s*-\*-\s*$', line)
 		if not match: break
-		setattr(optz, match.group('var').lstrip('-').replace('-', '_'), yaml.load(match.group('val')))
+		setattr(optz, match.group('var').lstrip('-').replace('-', '_'), yaml.safe_load(match.group('val')))
 
 import logging
 logging.basicConfig( level=logging.INFO
@@ -169,7 +169,7 @@ if optz.jinja2:
 			else: dst[name[0]] = ip
 
 	tpl_context = dict( hosts=hosts,
-		cfg=yaml.load(open(optz.jinja2_config)) if optz.jinja2_config else None )
+		cfg=yaml.safe_load(open(optz.jinja2_config)) if optz.jinja2_config else None )
 	cfg = cfg.render(**tpl_context)
 	if optz.jinja2_dump:
 		sys.stdout.write('### --- Template context:\n')
@@ -218,7 +218,7 @@ class OrderedDictYAMLLoader(yaml.Loader):
 			mapping[key] = value
 		return mapping
 
-cfg = yaml.load(cfg, OrderedDictYAMLLoader)
+cfg = yaml.safe_load(cfg, OrderedDictYAMLLoader)
 devnull = open(os.devnull, 'wb')
 
 
