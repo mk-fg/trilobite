@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 
 # XXX: scrap the whole thing in favor of nftables bpf-based filters (maybe with some templaing)
