@@ -185,11 +185,11 @@ cfg = re.sub(re.compile(r'[ \t]*\\\n\s*', re.M), ' ', cfg)
 
 from collections import OrderedDict
 
-class OrderedDictYAMLLoader(yaml.Loader):
+class OrderedDictYAMLLoader(yaml.SafeLoader):
 	'Based on: https://gist.github.com/844388'
 
 	def __init__(self, *args, **kwargs):
-		yaml.Loader.__init__(self, *args, **kwargs)
+		yaml.SafeLoader.__init__(self, *args, **kwargs)
 		self.add_constructor(u'tag:yaml.org,2002:map', type(self).construct_yaml_map)
 		self.add_constructor(u'tag:yaml.org,2002:omap', type(self).construct_yaml_map)
 
@@ -218,7 +218,7 @@ class OrderedDictYAMLLoader(yaml.Loader):
 			mapping[key] = value
 		return mapping
 
-cfg = yaml.safe_load(cfg, OrderedDictYAMLLoader)
+cfg = yaml.load(cfg, OrderedDictYAMLLoader)
 devnull = open(os.devnull, 'wb')
 
 
