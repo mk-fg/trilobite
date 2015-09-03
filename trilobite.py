@@ -317,8 +317,8 @@ def chainspec(chain):
 	else: policy = 'ACCEPT'
 
 	if '-' in chain: # like 'input-lan', for chain-global interface specification (useful in svc rules)
-		if chain.startswith('input'): rule = '-i'
-		elif chain.startswith('output'): rule = '-o'
+		if re.search(r'^(input|prerouting)-', chain): rule = '-i'
+		elif re.search(r'^(output|postrouting)-', chain): rule = '-o'
 		else: rule, pre = None, list()
 		if rule:
 			chain, pre = chain.rsplit('-', 1)
