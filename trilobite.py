@@ -1,5 +1,6 @@
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
+from __future__ import print_function
 
 # XXX: scrap the whole thing in favor of nftables bpf-based filters (maybe with some templaing)
 
@@ -171,15 +172,20 @@ if optz.jinja2:
 
 	tpl_context = dict( hosts=hosts,
 		cfg=yaml.safe_load(open(optz.jinja2_config)) if optz.jinja2_config else None )
-	cfg = cfg.render(**tpl_context)
+	try: cfg = cfg.render(**tpl_context)
+	except Exception as err: cfg, (err_t, err, err_tb) = None, sys.exc_info()
 	if optz.jinja2_dump:
-		sys.stdout.write('### --- Template context:\n')
+		print('### --- Template context:')
 		for line in yaml.safe_dump(
 				tpl_context, allow_unicode=True, default_flow_style=False ).splitlines():
 			sys.stdout.write('# {}\n'.format(line))
-		sys.stdout.write('### --- Template context ends\n\n')
-		sys.stdout.write(cfg)
+		print('### --- Template context ends\n')
+		if cfg is None:
+			print('### --- Template rendering FAILED with error: {} {}'.format(err_t, err))
+			raise err_t, err, err_tb
+		else: sys.stdout.write(cfg)
 		sys.exit()
+	elif cfg is None: raise err_t, err, err_tb
 
 cfg = cfg.replace(r'\t', '  ') # I tend to use tabs, which are not YAML-friendly
 cfg = re.sub(re.compile(r'[ \t]*\\\n\s*', re.M), ' ', cfg)
