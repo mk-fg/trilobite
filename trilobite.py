@@ -27,7 +27,8 @@ parser.add_argument('-j', '--jinja2', action='store_true',
 parser.add_argument('--jinja2-config', metavar='path',
 	help='YAML config to pass to jinja2 templates as "cfg" var.')
 parser.add_argument('--jinja2-dump', action='store_true',
-	help='Just dump config after jinja2 processing.')
+	help='Dump config after jinja2 processing'
+		' step along with template context values and exit.')
 
 parser.add_argument('-s', '--summary', action='store_true',
 	help='Show diff between old and new tables afterwards.')
@@ -173,7 +174,8 @@ if optz.jinja2:
 	cfg = cfg.render(**tpl_context)
 	if optz.jinja2_dump:
 		sys.stdout.write('### --- Template context:\n')
-		for line in yaml.dump(tpl_context, default_flow_style=False).splitlines():
+		for line in yaml.safe_dump(
+				tpl_context, allow_unicode=True, default_flow_style=False ).splitlines():
 			sys.stdout.write('# {}\n'.format(line))
 		sys.stdout.write('### --- Template context ends\n\n')
 		sys.stdout.write(cfg)
