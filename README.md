@@ -1,6 +1,11 @@
 trilobite: iptables wrapper for easy management of dual-stack (ipv4/ipv6) firewall configuration
 --------------------
 
+**Deprecation Warning:** Since Linux kernel 3.13+ (2014),
+[nft/nftables](https://wiki.nftables.org/) is a superior replacement that has nice
+dual-stack configuration support, and should probably be used instead of scripts
+such as this one.
+
 Yet another iptables wrapper, aiming to keep simple, clear and minimalistic
 state of dual-stack firewall in a
 [DRY](https://en.wikipedia.org/wiki/Don%27t_repeat_yourself) yaml configuration
