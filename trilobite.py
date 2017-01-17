@@ -329,7 +329,7 @@ def chainspec(chain):
 		elif re.search(r'^(output|postrouting)-', chain): rule = '-o'
 		else: rule, pre = None, list()
 		if rule:
-			chain, pre = chain.rsplit('-', 1)
+			chain, pre = chain.split('-', 1)
 			pre = [rule, pre]
 	else: pre = list()
 
