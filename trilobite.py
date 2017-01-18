@@ -157,20 +157,67 @@ if optz.jinja2:
 	cfg = env.from_string(cfg)
 
 	# Template parameters
-	hosts = dict()
-	for line in (line.strip().split() for line in open('/etc/hosts')):
-		if not line or line[0][0] == '#': continue
-		ip, names = line[0], line[1:]
-		for name in names:
-			name, dst = name.split('.'), hosts
-			if len(name) > 1:
-				for slug in reversed(name[1:]): dst = dst.setdefault(slug, dict())
-				if len(name) > 2: hosts.setdefault('.'.join(name[1:]), dict())[name[0]] = ip
-			if not isinstance(dst, dict):
-				log.debug('Name/domain conflict for {!r} (path: {})'.format(dst, '.'.join(name[1:])))
-			else: dst[name[0]] = ip
 
-	tpl_context = dict( hosts=hosts,
+	class HostsNode:
+		_slots = 'addr sub path'.split()
+		_defaults = property(lambda s: (None, dict(), list()))
+		__slots__ = _slots
+		def __init__(self, *args, **kws):
+			for k,v in it.chain( zip(self._slots, self._defaults),
+				zip(self._slots, args), kws.items() ): setattr(self, k, v)
+		def init_key(self, k, v=None):
+			if k not in self.sub: self.sub[k] = HostsNode(path=self.path + [k])
+			if v: self.sub[k].addr = v
+			return self.sub[k]
+		def __repr__(self):
+			return '<HN [{} {} {}]>'.format(
+				'.'.join(self.path) or '-', self.addr or '-', self.sub or '.' )
+		repr = __repr__
+		def __str__(self):
+			if not self.addr: raise ValueError
+			return str(self.addr)
+		def __getitem__(self, k):
+			try: return self.sub[k]
+			except KeyError: raise KeyError(self.repr(), k)
+		def __setitem__(self, k, v): self.init_key(k, v)
+		__getattr__ = __getitem__
+
+	tpl_parse_hosts_flags = 'fwd fwd-deep rev rev-deep fwd-rev1'.split()
+	def tpl_parse_hosts(flags='fwd fwd-rev1 rev-deep'.split()):
+		'''Parses /etc/hosts to mapping.
+			For example, `1.2.3.4 sub.host.example.org` will
+					produce following mapping (presented as yaml):
+				sub.host.example.org: 1.2.3.4
+				host.example.org:
+					sub: 1.2.3.4
+				org:
+					example:
+						host:
+							sub: 1.2.3.4
+			Can be used in templates as a reliable dns/network-independent names.'''
+		hosts, flag = HostsNode(), lambda k: k in flags
+		with open('/etc/hosts') as src:
+			for line in src:
+				line = line.strip().split()
+				if not line or line[0][0] == '#': continue
+				ip, names = line[0], line[1:]
+				for name in names:
+					if flag('fwd'): hosts[name] = ip # hosts['sub.host.example.org']
+					name = name.split('.')
+					if flag('rev'): hosts['.'.join(reversed(name))] = ip # hosts['org.example.host.sub']
+					dst_fwd = dst_rev = hosts
+					if len(name) > 1:
+						if flag('fwd-deep'): # hosts.sub.host.example
+							for slug in name[:-1]: dst_fwd = dst_fwd.init_key(slug)
+						if flag('rev-deep'): # hosts.org.example.host
+							for slug in reversed(name[1:]): dst_rev = dst_rev.init_key(slug)
+						if flag('fwd-rev1') and len(name) > 2: # hosts['host.example.org'].sub
+							hosts.init_key('.'.join(name[1:]))[name[0]] = ip
+					if flag('fwd-deep'): dst_fwd[name[-1]] = ip # hosts.sub.host.example.org
+					if flag('rev-deep'): dst_rev[name[0]] = ip # hosts.org.example.host.sub
+		return hosts
+
+	tpl_context = dict( hosts=tpl_parse_hosts(),
 		cfg=yaml.safe_load(open(optz.jinja2_config)) if optz.jinja2_config else None )
 	try: cfg = cfg.render(**tpl_context)
 	except Exception as err: cfg, (err_t, err, err_tb) = None, sys.exc_info()
